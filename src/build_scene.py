@@ -70,13 +70,28 @@ def create_part(sim, p, handles, groups):
     sim.setObjectInt32Param(h, sim.shapeintparam_static, 0 if p.kind == "dynamic" else 1)
     sim.setObjectInt32Param(h, sim.shapeintparam_respondable, 0 if p.kind == "paint" else 1)
     if p.kind == "dynamic":
-        sim.setShapeMass(h, 0.5)
+        sim.setShapeMass(h, p.mass)
     sensed = (sim.objectspecialproperty_collidable | sim.objectspecialproperty_measurable
               | sim.objectspecialproperty_detectable)
     sim.setObjectSpecialProperty(h, 0 if p.kind == "paint" else sensed)
     ref = handles[p.parent] if p.parent else sim.handle_world
     sim.setObjectOrientation(h, list(p.rot), ref)
     sim.setObjectPosition(h, list(p.pos), ref)
+    if p.kind == "merge":
+        # one rigid body (a dynamic shape's child would be a separate, loose body): group the two
+        # shapes into a compound shape that keeps the parent's name, place, dynamics and mass
+        parent = handles[p.parent]
+        alias, mass = sim.getObjectAlias(parent), sim.getShapeMass(parent)
+        up = sim.getObjectParent(parent)
+        g = sim.groupShapes([parent, h], False)
+        sim.setObjectAlias(g, alias)
+        sim.setObjectInt32Param(g, sim.shapeintparam_static, 0)
+        sim.setObjectInt32Param(g, sim.shapeintparam_respondable, 1)
+        sim.setShapeMass(g, mass)
+        sim.setObjectSpecialProperty(g, sensed)
+        sim.setObjectParent(g, up, True)
+        handles[p.parent] = g
+        return
     sim.setObjectParent(h, handles[p.parent] if p.parent else groups[p.group], True)
     handles[p.name] = h
 
@@ -147,8 +162,9 @@ def setup_ur5(sim, h, values):
     # the pad's top is 0.035 m above its origin along its +z; its suction face looks along -z
     origin = [flange[i] + 0.035 * axis[i] for i in range(3)]
     sim.setObjectMatrix(pad, frame_from_z([-a for a in axis], origin), sim.handle_world)
-    link = next(c for c in sim.getObjectsInTree(last_joint, sim.sceneobject_shape, 1 | 2))
-    sim.setObjectParent(pad, link, True)
+    # attach through the arm's own tool force sensor 'connection': a dynamic shape parented directly
+    # to another one is NOT held by it (the pad fell to the floor as a separate body, Part 9)
+    sim.setObjectParent(pad, sim.getObject("./connection", {"proxy": h}), True)
 
 
 def setup_camera(sim, h, values):
@@ -184,6 +200,53 @@ def create_model(sim, m, models_dir, groups):
     sim.setObjectPosition(h, [x, y, z], sim.handle_world)
     sim.setObjectAlias(h, m.name)
     sim.setObjectParent(h, groups[m.group], True)
+
+
+def qc_cell_extras(sim, group):
+    """What the QC cell needs to be driven from Python (Part 9):
+    - suction pad: starts OFF, function setSuction(on) (the library pad sucks anything it touches);
+    - UR5 IK: dummy 'tip' on the suction face (pad frame: +z away from the face) and dummy 'target'
+      (the pose Python asks the tip to reach);
+    - light barrier at the conveyor end: ray proximity sensor beside the belt, looking across it at
+      tote height, 10 cm before the end stop: 'a tote is waiting at the end stop'."""
+    ur5 = sim.getObject(f"/{ROOT_NAME}/ur5")
+    # the library base is a free dynamic body: once the arm leans out, the whole UR5 tipped off its
+    # pedestal. A real UR5 is bolted down: base static (set here, at the end: earlier it got reset)
+    sim.setObjectInt32Param(ur5, sim.shapeintparam_static, 1)
+    pad = sim.getObject(f"/{ROOT_NAME}/ur5/suctionPad")
+    s = next(o for o in sim.getObjectsInTree(pad, sim.sceneobject_script, 0))
+    txt = sim.getObjectStringParam(s, sim.scriptstringparam_text)
+    txt = txt.decode() if isinstance(txt, bytes) else txt
+    txt = txt.replace("enabled=true", "enabled=false", 1)
+    txt += "\n\nfunction setSuction(on)  -- added by build_scene.py\n    enabled=on\nend\n"
+    sim.setObjectStringParam(s, sim.scriptstringparam_text, txt)
+    face = sim.getObject(f"/{ROOT_NAME}/ur5/suctionPad/Sensor")
+    tip = sim.createDummy(0.02)
+    m = sim.getObjectMatrix(pad, sim.handle_world)
+    p = sim.getObjectPosition(face, sim.handle_world)
+    m[3], m[7], m[11] = p
+    sim.setObjectMatrix(tip, m, sim.handle_world)
+    sim.setObjectAlias(tip, "tip")
+    sim.setObjectParent(tip, pad, True)
+    target = sim.createDummy(0.02)
+    sim.setObjectMatrix(target, m, sim.handle_world)
+    sim.setObjectAlias(target, "target")
+    sim.setObjectParent(target, ur5, True)
+    for d in (tip, target):
+        sim.setObjectInt32Param(d, sim.objintparam_visibility_layer, 0)      # invisible markers
+    # start pose: pad down above the conveyor end (instead of the library's arm-straight-up pose)
+    from qc_cell import HOME_DEG
+    for j, a in zip(sim.getObjectsInTree(ur5, sim.sceneobject_joint, 0), HOME_DEG):
+        sim.setJointPosition(j, math.radians(a))
+        sim.setJointTargetPosition(j, math.radians(a))
+    sim.setObjectMatrix(target, sim.getObjectMatrix(tip, sim.handle_world), sim.handle_world)
+    # light barrier: ray across the belt, 10 cm before the end stop, 3 cm above the belt
+    ray = sim.createProximitySensor(sim.proximitysensor_ray, 16, 0, [0] * 8,
+                                    [0.0, 0.6, 0.01, 0.01, 0.01, 0.01, 0.0, 0.01, 0.01, 0.0, 0.0, 0.0, 0.002, 0.0, 0.0])
+    sim.setObjectMatrix(ray, frame_from_z([0.0, 1.0, 0.0], [layout.QC_X1 - 0.10, layout.QC_Y - 0.30, layout.PICK_H + 0.01]),
+                        sim.handle_world)
+    sim.setObjectAlias(ray, "barriere_fin_convoyeur")
+    sim.setObjectParent(ray, group, True)
 
 
 SENSED = None   # set in main(): collidable | measurable | detectable
@@ -305,6 +368,8 @@ def main():
     for w in layout.WALKERS:
         create_walker(sim, w, models_dir, walkers)
     print(f"Added {len(layout.WALKERS)} walking workers.")
+    qc_cell_extras(sim, groups["test"])
+    print("QC cell: suction hook, IK tip/target, light barrier at the conveyor end.")
 
     try:
         text = client.require("textUtils")

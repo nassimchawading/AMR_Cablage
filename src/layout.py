@@ -29,18 +29,36 @@ BOT_Y0, BOT_Y1 = 0.15, 4.25         # bottom row of stations
 COL_X = [(0.3, 6.0), (7.0, 13.0), (14.0, 19.7)]   # the three station columns
 COL_CX = [3.15, 10.0, 16.85]                        # column centres (drop tables)
 
-DROP_TOP_Y, DROP_BOT_Y = 8.15, 3.85  # centre of the drop tables ("postes de dépose")
+DROP_TOP_Y, DROP_BOT_Y = 8.10, 3.90  # centre of the drop tables ("postes de dépose"); front faces 7.85 / 4.15
 ROBOT_TOP_Y, ROBOT_BOT_Y = 7.0, 5.0  # where the robot stops in front of them
-# Height of every surface the robot loads/unloads at (drop tables, conveyor end).
-# Low on purpose: the youBot's arm (base ~0.15 m high) only reaches ~0.5 m. Check in the robot part.
+# Height of the QC cell's conveyor and UR5 base.
 PICK_H = 0.45
+# AMR transfer tables ("postes de dépose"): the youBot arm (shoulder 0.25 m high, links 0.155 +
+# 0.135 m) cannot reach higher than ~0.4 m at the table's depth (measured in Part 7). Real AMR
+# transfer stations are built at the robot's height too.
+TABLE_H = 0.25
+TABLE_SIZE = (0.80, 0.50)            # along the aisle, depth
+# Transport unit: small tote ("bac") with a handle fin on top that the gripper (opens ~7 cm) holds.
+TOTE = (0.20, 0.14, 0.08)            # along the aisle, depth (= robot approach direction), height
+# Handle: short square post (thickness, length, height). The youBot finger pads are only 4.5 cm long
+# with the palm right behind them: a longer fin hit the palm before the fingers closed (Part 7).
+FIN = (0.03, 0.03, 0.05)
+TOTE_MASS = 0.3                      # kg (youBot arm payload: 0.5 kg)
+TOTE_INSET = 0.10                    # tote centre behind the table's front edge
 # Test électrique = quality-control cell: test benches -> inspection conveyor (along +x) under a
 # camera -> UR5 arm with suction pad sorts each harness box: OK table (-> Expédition) or REBUTS
 # table (-> Assemblage, rework). Both tables are at the aisle edge for the AMR.
-TEST_DROP_X, REBUTS_X = 10.35, 11.45            # OK table / REBUTS table centres
-QC_Y, QC_X0, QC_X1 = 2.4, 7.3, 10.7             # inspection conveyor: axis y, start x, end x
+# Regrouped around the UR5 (Part 9): the conveyor end and the two tote spots on the tables (where
+# the youBot picks them) are all ~0.73 m from the arm base (UR5 reach 0.85 m).
+TEST_DROP_X, REBUTS_X = 10.08, 10.92            # OK table / REBUTS table centres (side by side)
+QC_Y, QC_X0, QC_X1 = 2.75, 7.3, 10.5            # inspection conveyor: axis y, start x, end x
 QC_CAM_X = 9.0                                   # camera gantry above the conveyor
-ARM_X, ARM_Y = 10.95, 3.05                       # UR5 base (reach 0.85 m: conveyor end + both tables)
+ARM_X, ARM_Y = 10.5, 3.45                        # UR5 base, right behind the two tables
+QC_SPEED = 0.10                                  # m/s, conveyor belt
+QC_TOTES = [(7.5, True), (8.1, False), (8.7, True)]   # (x, QC tag OK?) at start: all pass under the camera
+# where the UR5 puts sorted totes on a table: front spot (the youBot picks it there), then a buffer
+# spot behind it, closer to the arm. y offsets from the table centre (bottom row: front = +y)
+QC_SLOTS_DY = (TABLE_SIZE[1] / 2 - TOTE_INSET, -0.10)
 
 S, N, W, E = -math.pi / 2, math.pi / 2, math.pi, 0.0   # headings (direction an object faces)
 
@@ -115,6 +133,8 @@ class Part:
     kind: str = "solid"     # "solid": obstacle, physical, static, seen by sensors
                             # "dynamic": like solid, but moved by physics (e.g. bins on the conveyor)
                             # "paint": floor marking / decoration, no physics, no sensing
+                            # "merge": merged into its parent (one rigid body, e.g. a tote's handle)
+    mass: float = 0.5       # kg, "dynamic" parts only
 
 
 @dataclass
@@ -248,8 +268,16 @@ def wall_run(side, start, end, openings=()):
 
 def aruco(station, x, y, z, facing):
     """Real ArUco marker (library model, generated with the station's id) on a vertical face.
-    facing: N / S / E / W, the direction the printed side looks to (towards the aisle)."""
-    rot = {S: (math.pi / 2, 0.0, 0.0), N: (-math.pi / 2, 0.0, 0.0), E: (0.0, math.pi / 2, 0.0)}[facing]
+    facing: N / S / E / W, the direction the printed side looks to (towards the aisle).
+    (x, y) = position on the face. The marker is printed on a white plate: ArUco detection needs a
+    light margin ("quiet zone") around the marker's black border."""
+    # the model's printed side is its -z face (checked with the robot camera: the other way round,
+    # OpenCV only decoded the mirrored image)
+    rot = {S: (-math.pi / 2, 0.0, 0.0), N: (math.pi / 2, 0.0, 0.0), E: (0.0, -math.pi / 2, 0.0)}[facing]
+    dx, dy = {S: (0.0, -1.0), N: (0.0, 1.0), E: (1.0, 0.0)}[facing]
+    m = ARUCO_SIZE + 0.06
+    box("aruco_fond", (0.002, m, m) if dx else (m, 0.002, m), (x + dx * 0.001, y + dy * 0.001, z), C["white"], kind="paint")
+    x, y = x + dx * 0.0045, y + dy * 0.0045
     model(f"aruco_{STATIONS[station]['marker_id']}", "aruco", x, y, z, rot=rot,
           setup=dict(aruco=dict(id=STATIONS[station]["marker_id"], size=ARUCO_SIZE)))
 
@@ -281,20 +309,41 @@ def reel(name, x, y, z0, d, w, color, axis="y"):
 
 
 def drop_table(station, cx, cy, facing, top=C["drop_top"]):
-    """Pick-up / drop-off point ("poste de dépose"): low cabinet (PICK_H high, closed down to
-    the floor) with the station's ArUco marker on the side facing the aisle."""
-    box("poste_depose_base", (0.92, 0.52, PICK_H - 0.04), (cx, cy, (PICK_H - 0.04) / 2), C["drop_base"])
-    box("poste_depose_plateau", (1.0, 0.6, 0.04), (cx, cy, PICK_H - 0.02), top)
+    """AMR transfer table ("poste de dépose"): low cabinet (TABLE_H high, closed down to the floor,
+    so the lidar sees its front face) with the station's ArUco marker on the face towards the aisle."""
+    sx, sy = TABLE_SIZE
+    box("poste_depose_base", (sx, sy, TABLE_H - 0.02), (cx, cy, (TABLE_H - 0.02) / 2), C["drop_base"])
+    box("poste_depose_plateau", (sx, sy, 0.02), (cx, cy, TABLE_H - 0.01), top)
     sign = -1 if facing == S else 1
-    aruco(station, cx, cy + sign * 0.26, PICK_H / 2, facing)
+    aruco(station, cx, cy + sign * sy / 2, (TABLE_H - 0.02) / 2, facing)
 
 
-def harness_box(name, x, y, z0, ok):
-    """Box with a tested harness inside and a quality tag on top: green = OK, red = defect.
-    Dynamic, so the conveyor carries it. The QC camera reads the tag colour."""
-    b = box(name, (0.30, 0.20, 0.12), (x, y, z0 + 0.06), C["bin"], kind="dynamic")
-    cyl(name + "_faisceau", 0.14, 0.03, (-0.04, 0.0, 0.065), C["cable_black"], parent=b, kind="paint")
-    box(name + "_etiquette", (0.08, 0.08, 0.004), (0.09, 0.0, 0.062), C["green"] if ok else C["red"], parent=b, kind="paint")
+def tote_on_table(station, content=None, tag=None):
+    """Tote waiting on a station's table, centred in front of the robot's docking position."""
+    x, _, heading = STATIONS[station]["pose"]
+    if heading == N:        # top row: the robot looks north at the table
+        y = DROP_TOP_Y - TABLE_SIZE[1] / 2 + TOTE_INSET
+    else:                   # bottom row
+        y = DROP_BOT_Y + TABLE_SIZE[1] / 2 - TOTE_INSET
+    return tote(f"bac_{station}", x, y, TABLE_H + 0.002, content, tag)
+
+
+def tote(name, x, y, z0, content=None, tag=None):
+    """Transport tote with a handle fin on top (one rigid body), dynamic: the conveyor carries it,
+    the arms pick it. content: 'faisceau' (harness) or 'bobines' (reels). tag: True = green QC tag
+    (OK), False = red (defect), None = no tag. The QC camera reads the tag colour."""
+    sx, sy, sz = TOTE
+    b = box(name, TOTE, (x, y, z0 + sz / 2), C["bin"], kind="dynamic", mass=TOTE_MASS)
+    box(name + "_poignee", FIN, (0.0, 0.0, sz / 2 + FIN[2] / 2), C["dark"], parent=b, kind="merge")
+    if content == "faisceau":
+        cyl(name + "_faisceau", 0.10, 0.02, (-0.05, 0.0, sz / 2 + 0.01), C["cable_black"], parent=b, kind="paint")
+    elif content == "bobines":
+        for dy in (-0.035, 0.035):
+            cyl(name + "_bobine", 0.06, 0.03, (-0.05, dy, sz / 2 + 0.015), CABLES[0], parent=b, kind="paint")
+    if tag is not None:
+        box(name + "_etiquette", (0.05, 0.05, 0.004), (0.06, 0.0, sz / 2 + 0.002),
+            C["green"] if tag else C["red"], parent=b, kind="paint")
+    return b
 
 
 def pallet(name, cx, cy):
@@ -380,7 +429,7 @@ def inspection_conveyor(name, x0, x1, y, width=0.5, h=PICK_H):
     radius = 0.1
     length = (x1 - x0) - 2 * radius - 0.04     # distance between the end drums
     model(name, "conveyor", (x0 + x1) / 2, y, h - 0.02, heading=E,
-          setup=dict(conveyor=dict(length=length, width=width, radius=radius, targetVel=0.05,
+          setup=dict(conveyor=dict(length=length, width=width, radius=radius, targetVel=QC_SPEED,
                                    color=[0.08, 0.08, 0.08], frameColor=list(C["steel"]))))
     leg_h = h - 0.23
     for xx in (x0 + 0.3, (x0 + x1) / 2, x1 - 0.3):
@@ -406,7 +455,7 @@ def ur5_cell(name, x, y):
     safety outline on the floor around it. Its library demo script is removed in build_scene."""
     box(name + "_socle", (0.40, 0.40, PICK_H), (x, y, PICK_H / 2), C["dark"])
     model(name, "ur5", x, y, PICK_H + 0.015, heading=W, setup=dict(ur5=dict(suction_pad=True)))
-    rect_outline(name + "_zone", x - 0.55, y - 0.35, x + 0.55, y + 0.4, C["yellow"], 0.06, 0.005)
+    rect_outline(name + "_zone", x - 0.55, y - 0.45, x + 0.55, y + 0.15, C["yellow"], 0.06, 0.005)
 
 
 def bill(name, key, x, y, heading):
@@ -447,9 +496,9 @@ def _build():
     group("dock")
     box("dock_sol", (1.2, 1.2, 0.005), (0.75, 6.0, 0.007), C["dock"], kind="paint")
     box("borne_recharge", (0.35, 0.8, 0.6), (0.175, 6.0, 0.30), C["dock"])
-    for dy in (-0.12, 0.12):
+    for dy in (-0.17, 0.17):                # charging contacts, on both sides of the marker
         box("contact", (0.02, 0.08, 0.04), (0.36, 6.0 + dy, 0.12), C["copper"], kind="paint")
-    aruco("dock", 0.35, 6.0, 0.42, E)
+    aruco("dock", 0.35, 6.0, 0.15, E)       # low, like the stations' markers: in the camera's view
     label("DOCK", 1.6, 6.0, 0.25)
 
     group("magasin")
@@ -462,6 +511,7 @@ def _build():
         for dy in (-0.2, 0.2):
             reel("bobine", 5.1 + dx, 8.75 + dy, top, 0.35, 0.30, CABLES[3], axis="z")
     drop_table("magasin", COL_CX[0], DROP_TOP_Y, S)
+    tote_on_table("magasin", content="bobines")            # reels ready to go to Coupe
 
     group("coupe")
     cutting_machine("machine_coupe", 8.4, 10.9)
@@ -499,16 +549,14 @@ def _build():
     inspection_conveyor("convoyeur_controle", QC_X0, QC_X1, QC_Y)
     camera_gantry("portique_camera", QC_CAM_X, QC_Y)
     light_tower("convoyeur_controle", QC_X0 + 0.1, QC_Y + 0.4, 0.0)
-    for x, ok in ((7.7, True), (8.5, False), (QC_X1 - 0.2, True)):      # boxes travelling to the arm
-        harness_box("bac_faisceau", x, QC_Y, PICK_H + 0.005, ok)
+    for x, ok in QC_TOTES:                                               # totes travelling to the arm
+        tote("bac_faisceau", x, QC_Y, PICK_H + 0.005, "faisceau", ok)
     ur5_cell("ur5", ARM_X, ARM_Y)
-    drop_table("test", TEST_DROP_X, DROP_BOT_Y, N)                       # OK -> Expédition
-    harness_box("bac_faisceau", TEST_DROP_X - 0.2, DROP_BOT_Y, PICK_H + 0.005, True)
+    drop_table("test", TEST_DROP_X, DROP_BOT_Y, N)                       # OK -> Expédition (empty: the UR5 fills it)
 
-    group("rebuts")   # REBUTS table of the QC cell: rejected boxes -> AMR -> Assemblage (rework)
+    group("rebuts")   # REBUTS table of the QC cell: rejected totes -> AMR -> Assemblage (rework)
     drop_table("rebuts", REBUTS_X, DROP_BOT_Y, N, top=C["red"])
-    harness_box("bac_faisceau", REBUTS_X + 0.2, DROP_BOT_Y, PICK_H + 0.005, False)
-    label("REBUTS", 12.45, 3.2, 0.2, C["red"])
+    label("REBUTS", 11.85, 3.3, 0.2, C["red"])
 
     group("expedition")
     for x, layers in ((1.4, 2), (3.0, 3), (4.6, 1)):

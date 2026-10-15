@@ -94,7 +94,9 @@ class Route:
 
 
 class Navigator:
-    def __init__(self, sim, robot, sensors, grid, draw=True, walkers=None, log=print):
+    def __init__(self, sim, robot, sensors, grid, draw=False, walkers=None, log=print):
+        # draw=True shows the planned route as a blue line (debugging only: in the demo it would make
+        # the robot look like a line follower, which it is not - the route only exists in its memory)
         self.sim, self.robot, self.sensors, self.grid = sim, robot, sensors, grid
         self.planner = Planner(grid)
         self.log = log

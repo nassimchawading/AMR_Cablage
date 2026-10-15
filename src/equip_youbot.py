@@ -14,6 +14,8 @@ import math
 LIDAR_POS = (0.33, 0.0, 0.13)       # forward, left, up (m)
 CAMERA_POS = (0.33, 0.0, 0.22)
 CAMERA_RES, CAMERA_ANGLE = (640, 480), math.radians(60)
+CAMERA_TILT = math.radians(15)      # looks slightly down: the station markers (low, on the transfer
+                                    # tables) stay in view down to ~0.25 m (Part 7, docking)
 # (name, forward, left, height, direction in deg: 0 = forward, 90 = left)
 # The front one sits above the lidar and camera: at 15 cm the lidar body hid its view.
 SONARS = [("avant", 0.30, 0.00, 0.25, 0), ("avant_gauche", 0.29, 0.20, 0.15, 45), ("gauche", 0.0, 0.22, 0.15, 90),
@@ -62,6 +64,27 @@ def add_youbot(sim, x, y, heading, name="youBot"):
     # the small scripts on the wheels (mecanum roller effect) and on the gripper are kept
     for s in sim.getObjectsInTree(robot, sim.sceneobject_script, 1 | 2):
         sim.removeObjects([s])
+    place_youbot(sim, robot, x, y, heading)
+    sim.setObjectAlias(robot, name)
+    equip(sim, robot, sim.getObject("./youBot_ref", {"proxy": robot}))
+    _gripper_hook(sim, robot)
+    return robot
+
+
+def _gripper_hook(sim, robot):
+    """The library gripper script keeps the fingers opening (global 'opening'): add a function so
+    that Python can open / close it: sim.callScriptFunction('setGripper', script, open)."""
+    for s in sim.getObjectsInTree(robot, sim.sceneobject_script, 0):
+        txt = sim.getObjectStringParam(s, sim.scriptstringparam_text)
+        txt = txt.decode() if isinstance(txt, bytes) else txt
+        if "youBotGripperJoint2" in txt and "setGripper" not in txt:
+            txt += "\n\nfunction setGripper(open)  -- added by equip_youbot.py\n    opening=open\nend\n"
+            sim.setObjectStringParam(s, sim.scriptstringparam_text, txt)
+
+
+def place_youbot(sim, robot, x, y, heading):
+    """Put the robot so that youBot_ref is at (x, y) facing `heading` (rad). Also works during a
+    simulation (tests start the robot in front of a station): its physics state is then reset."""
     ref = sim.getObject("./youBot_ref", {"proxy": robot})
     m = sim.getObjectMatrix(ref, sim.handle_world)
     h0 = math.atan2(m[5], m[1])                                  # robot forward = +y of youBot_ref
@@ -69,9 +92,8 @@ def add_youbot(sim, x, y, heading, name="youBot"):
     rm[3] += x - m[3]
     rm[7] += y - m[7]
     sim.setObjectMatrix(robot, rm, sim.handle_world)
-    sim.setObjectAlias(robot, name)
-    equip(sim, robot, ref)
-    return robot
+    if sim.getSimulationState() != sim.simulation_stopped:
+        sim.resetDynamicObject(robot | sim.handleflag_model)
 
 
 def equip(sim, robot, ref):
@@ -106,7 +128,9 @@ def equip(sim, robot, ref):
     # --- camera: built-in vision sensor looking forward
     cam = sim.createVisionSensor(2, [CAMERA_RES[0], CAMERA_RES[1], 0, 0],
                                  [0.02, 10.0, CAMERA_ANGLE, 0.03, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    sim.setObjectMatrix(cam, _matrix_z_forward(_dir_world(frame, 0), _to_world(frame, *CAMERA_POS)), sim.handle_world)
+    up = frame[3]
+    look = [math.cos(CAMERA_TILT) * f - math.sin(CAMERA_TILT) * u for f, u in zip(_dir_world(frame, 0), up)]
+    sim.setObjectMatrix(cam, _matrix_z_forward(look, _to_world(frame, *CAMERA_POS)), sim.handle_world)
     sim.setObjectAlias(cam, "camera")
     sim.setObjectParent(cam, robot, True)
 
