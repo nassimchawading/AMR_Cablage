@@ -1,0 +1,12 @@
+# Python virtual environment and caches (recreated from INSTALL_LOG.md)
+.venv/
+__pycache__/
+*.pyc
+
+# CoppeliaSim backup / temporary files
+*.ttt.bak
+*.ttm.bak
+
+# OS / editor clutter
+Thumbs.db
+desktop.ini

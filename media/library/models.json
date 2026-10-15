@@ -1,0 +1,594 @@
+{
+  "infrastructure/floors/5mX5m concrete floor.ttm": {
+    "alias": "Floor",
+    "size": [
+      5.0,
+      5.0,
+      0.202
+    ],
+    "origin_from_min_corner": [
+      2.5,
+      2.5,
+      0.1
+    ],
+    "extras": []
+  },
+  "infrastructure/walls/240cm high walls/wall section 400cm.ttm": {
+    "alias": "240cmHighWall400cm",
+    "size": [
+      0.15,
+      4.011,
+      2.4
+    ],
+    "origin_from_min_corner": [
+      0.075,
+      2.005,
+      1.2
+    ],
+    "extras": []
+  },
+  "infrastructure/walls/240cm high walls/wall section 200cm.ttm": {
+    "alias": "240cmHighWall200cm",
+    "size": [
+      0.15,
+      2.011,
+      2.4
+    ],
+    "origin_from_min_corner": [
+      0.075,
+      1.005,
+      1.2
+    ],
+    "extras": []
+  },
+  "infrastructure/walls/240cm high walls/wall section 100cm.ttm": {
+    "alias": "240cmHighWall100cm",
+    "size": [
+      0.15,
+      1.011,
+      2.4
+    ],
+    "origin_from_min_corner": [
+      0.075,
+      0.505,
+      1.2
+    ],
+    "extras": []
+  },
+  "infrastructure/walls/240cm high walls/L wall.ttm": {
+    "alias": "240cmHighWallL",
+    "size": [
+      0.205,
+      0.205,
+      2.4
+    ],
+    "origin_from_min_corner": [
+      0.1,
+      0.105,
+      1.2
+    ],
+    "extras": []
+  },
+  "infrastructure/walls/240cm high walls/pillar 50cm.ttm": {
+    "alias": "240cmHighPillar50cm",
+    "size": [
+      0.5,
+      0.5,
+      2.4
+    ],
+    "origin_from_min_corner": [
+      0.25,
+      0.25,
+      1.2
+    ],
+    "extras": []
+  },
+  "infrastructure/windows/140cm window.ttm": {
+    "alias": "window140cm",
+    "size": [
+      0.18,
+      1.4,
+      2.4
+    ],
+    "origin_from_min_corner": [
+      0.09,
+      0.7,
+      1.2
+    ],
+    "extras": []
+  },
+  "infrastructure/doors/automatic double sliding door.ttm": {
+    "alias": "slidingDoor",
+    "size": [
+      0.19,
+      3.3,
+      2.4
+    ],
+    "origin_from_min_corner": [
+      0.095,
+      1.65,
+      1.2
+    ],
+    "extras": [
+      "script /slidingDoor/Script (676 chars)"
+    ]
+  },
+  "infrastructure/doors/automatic sliding door.ttm": {
+    "alias": "slidingDoor",
+    "size": [
+      0.17,
+      1.75,
+      2.4
+    ],
+    "origin_from_min_corner": [
+      0.085,
+      0.875,
+      1.2
+    ],
+    "extras": [
+      "script /slidingDoor/Script (516 chars)"
+    ]
+  },
+  "furniture/shelves-cupboards-racks/rack.ttm": {
+    "alias": "rack",
+    "size": [
+      0.3,
+      1.2,
+      1.97
+    ],
+    "origin_from_min_corner": [
+      0.15,
+      0.6,
+      0.855
+    ],
+    "extras": []
+  },
+  "furniture/shelves-cupboards-racks/deep cupboard.ttm": {
+    "alias": "cupboard",
+    "size": [
+      0.6,
+      1.22,
+      1.97
+    ],
+    "origin_from_min_corner": [
+      0.31,
+      0.61,
+      0.985
+    ],
+    "extras": [
+      "script /cupboard/Script (1307 chars)"
+    ]
+  },
+  "furniture/tables/customizable table.ttm": {
+    "alias": "customizableTable",
+    "size": [
+      1.4,
+      0.8,
+      0.705
+    ],
+    "origin_from_min_corner": [
+      0.7,
+      0.4,
+      0.7
+    ],
+    "extras": [
+      "script /customizableTable/Script (1504 chars)"
+    ]
+  },
+  "furniture/tables/high table.ttm": {
+    "alias": "highTable",
+    "size": [
+      0.6,
+      0.9,
+      1.2
+    ],
+    "origin_from_min_corner": [
+      0.3,
+      0.45,
+      0.6
+    ],
+    "extras": []
+  },
+  "equipment/conveyors/generic conveyor (belt).ttm": {
+    "alias": "conveyor",
+    "size": [
+      1.216,
+      0.2,
+      0.233
+    ],
+    "origin_from_min_corner": [
+      0.608,
+      0.1,
+      0.213
+    ],
+    "extras": [
+      "custom data on /conveyor: ['PATHCTRLPTHANDLES', 'ABC_PATH_INFO', '__fingerPrint__', '__pathFingerPrint__', 'PATHCTRLPTS', 'PATHCTRLPTS_X', 'PATH', 'PATH_X', '__config__', '__info__', '__state__']",
+      "script /conveyor/Script (484 chars)",
+      "custom data on /conveyor/_ctrlPt[0]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[1]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[2]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[3]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[4]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[5]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[6]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[7]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[8]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[9]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[10]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[11]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[12]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[13]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[14]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[15]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[16]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[17]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/pad[0]: ['PATHPAD']",
+      "custom data on /conveyor/pad[1]: ['PATHPAD']",
+      "custom data on /conveyor/pad[2]: ['PATHPAD']",
+      "custom data on /conveyor/pad[3]: ['PATHPAD']",
+      "custom data on /conveyor/pad[4]: ['PATHPAD']",
+      "custom data on /conveyor/pad[5]: ['PATHPAD']",
+      "custom data on /conveyor/pad[6]: ['PATHPAD']",
+      "custom data on /conveyor/pad[7]: ['PATHPAD']",
+      "custom data on /conveyor/pad[8]: ['PATHPAD']",
+      "custom data on /conveyor/pad[9]: ['PATHPAD']",
+      "custom data on /conveyor/pad[10]: ['PATHPAD']",
+      "custom data on /conveyor/pad[11]: ['PATHPAD']",
+      "custom data on /conveyor/pad[12]: ['PATHPAD']",
+      "custom data on /conveyor/pad[13]: ['PATHPAD']",
+      "custom data on /conveyor/pad[14]: ['PATHPAD']",
+      "custom data on /conveyor/pad[15]: ['PATHPAD']",
+      "custom data on /conveyor/pad[16]: ['PATHPAD']",
+      "custom data on /conveyor/pad[17]: ['PATHPAD']",
+      "custom data on /conveyor/pad[18]: ['PATHPAD']",
+      "custom data on /conveyor/pad[19]: ['PATHPAD']",
+      "custom data on /conveyor/pad[20]: ['PATHPAD']",
+      "custom data on /conveyor/pad[21]: ['PATHPAD']",
+      "custom data on /conveyor/pad[22]: ['PATHPAD']",
+      "custom data on /conveyor/pad[23]: ['PATHPAD']",
+      "custom data on /conveyor/pad[24]: ['PATHPAD']",
+      "custom data on /conveyor/pad[25]: ['PATHPAD']",
+      "custom data on /conveyor/pad[26]: ['PATHPAD']",
+      "custom data on /conveyor/pad[27]: ['PATHPAD']",
+      "custom data on /conveyor/pad[28]: ['PATHPAD']",
+      "custom data on /conveyor/pad[29]: ['PATHPAD']",
+      "custom data on /conveyor/pad[30]: ['PATHPAD']",
+      "custom data on /conveyor/pad[31]: ['PATHPAD']",
+      "custom data on /conveyor/pad[32]: ['PATHPAD']",
+      "custom data on /conveyor/pad[33]: ['PATHPAD']",
+      "custom data on /conveyor/pad[34]: ['PATHPAD']",
+      "custom data on /conveyor/pad[35]: ['PATHPAD']",
+      "custom data on /conveyor/pad[36]: ['PATHPAD']",
+      "custom data on /conveyor/pad[37]: ['PATHPAD']",
+      "custom data on /conveyor/pad[38]: ['PATHPAD']",
+      "custom data on /conveyor/pad[39]: ['PATHPAD']",
+      "custom data on /conveyor/pad[40]: ['PATHPAD']",
+      "custom data on /conveyor/pad[41]: ['PATHPAD']",
+      "custom data on /conveyor/pad[42]: ['PATHPAD']",
+      "custom data on /conveyor/pad[43]: ['PATHPAD']",
+      "custom data on /conveyor/pad[44]: ['PATHPAD']",
+      "custom data on /conveyor/pad[45]: ['PATHPAD']",
+      "custom data on /conveyor/pad[46]: ['PATHPAD']",
+      "custom data on /conveyor/pad[47]: ['PATHPAD']",
+      "custom data on /conveyor/pad[48]: ['PATHPAD']",
+      "custom data on /conveyor/pad[49]: ['PATHPAD']",
+      "custom data on /conveyor/shape: ['ABC_PATHSHAPE_INFO']"
+    ]
+  },
+  "equipment/conveyors/generic conveyor (rollers).ttm": {
+    "alias": "conveyor",
+    "size": [
+      1.05,
+      0.19,
+      0.07
+    ],
+    "origin_from_min_corner": [
+      0.525,
+      0.095,
+      0.05
+    ],
+    "extras": [
+      "custom data on /conveyor: ['PATHCTRLPTHANDLES', 'ABC_PATH_INFO', '__fingerPrint__', '__pathFingerPrint__', 'PATHCTRLPTS', 'PATHCTRLPTS_X', 'PATH', 'PATH_X', '__config__', '__info__', '__state__']",
+      "script /conveyor/Script (486 chars)",
+      "custom data on /conveyor/_ctrlPt[0]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[1]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[2]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[3]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[4]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[5]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[6]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[7]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[8]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[9]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[10]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[11]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[12]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[13]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[14]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[15]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[16]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/_ctrlPt[17]: ['ABC_PATHCTRLPT']",
+      "custom data on /conveyor/jrol[0]: ['PATHROL']",
+      "custom data on /conveyor/jrol[1]: ['PATHROL']",
+      "custom data on /conveyor/jrol[2]: ['PATHROL']",
+      "custom data on /conveyor/jrol[3]: ['PATHROL']",
+      "custom data on /conveyor/jrol[4]: ['PATHROL']",
+      "custom data on /conveyor/jrol[5]: ['PATHROL']",
+      "custom data on /conveyor/jrol[6]: ['PATHROL']",
+      "custom data on /conveyor/jrol[7]: ['PATHROL']",
+      "custom data on /conveyor/jrol[8]: ['PATHROL']",
+      "custom data on /conveyor/jrol[9]: ['PATHROL']",
+      "custom data on /conveyor/jrol[10]: ['PATHROL']",
+      "custom data on /conveyor/jrol[11]: ['PATHROL']",
+      "custom data on /conveyor/jrol[12]: ['PATHROL']",
+      "custom data on /conveyor/jrol[13]: ['PATHROL']",
+      "custom data on /conveyor/jrol[14]: ['PATHROL']",
+      "custom data on /conveyor/jrol[15]: ['PATHROL']",
+      "custom data on /conveyor/shape: ['ABC_PATHSHAPE_INFO']"
+    ]
+  },
+  "equipment/panes/pane (grid) 2.0 x 2.0.ttm": {
+    "alias": "Pane",
+    "size": [
+      2.019,
+      0.036,
+      2.001
+    ],
+    "origin_from_min_corner": [
+      0.018,
+      0.018,
+      1.0
+    ],
+    "extras": []
+  },
+  "equipment/panes/pane (grid) 1.0 x 2.0.ttm": {
+    "alias": "Pane",
+    "size": [
+      1.018,
+      0.036,
+      2.001
+    ],
+    "origin_from_min_corner": [
+      0.018,
+      0.018,
+      1.0
+    ],
+    "extras": []
+  },
+  "equipment/generic tray.ttm": {
+    "alias": "genericTray",
+    "size": [
+      0.2,
+      0.25,
+      0.055
+    ],
+    "origin_from_min_corner": [
+      0.1,
+      0.125,
+      0.002
+    ],
+    "extras": [
+      "custom data on /genericTray: ['_tray_info_']",
+      "script /genericTray/Script (18325 chars)"
+    ]
+  },
+  "household/largeBasket.ttm": {
+    "alias": "Basket",
+    "size": [
+      0.805,
+      0.805,
+      0.185
+    ],
+    "origin_from_min_corner": [
+      0.402,
+      0.402,
+      0.093
+    ],
+    "extras": []
+  },
+  "office items/laptop.ttm": {
+    "alias": "laptop",
+    "size": [
+      0.18,
+      0.35,
+      0.411
+    ],
+    "origin_from_min_corner": [
+      0.09,
+      0.175,
+      0.205
+    ],
+    "extras": []
+  },
+  "other/aruco marker.ttm": {
+    "alias": "arucoMarker",
+    "size": [
+      0.1,
+      0.1,
+      0.005
+    ],
+    "origin_from_min_corner": [
+      0.05,
+      0.05,
+      -0.0
+    ],
+    "extras": [
+      "script /arucoMarker (59 chars)",
+      "custom data on /arucoMarker: ['__info__', '__config__']"
+    ]
+  },
+  "people/Standing Bill.ttm": {
+    "alias": "Bill",
+    "size": [
+      0.341,
+      0.523,
+      1.677
+    ],
+    "origin_from_min_corner": [
+      0.142,
+      0.262,
+      -0.001
+    ],
+    "extras": [
+      "script /Bill (1866 chars)"
+    ]
+  },
+  "people/Working Bill.ttm": {
+    "alias": "Bill",
+    "size": [
+      0.381,
+      0.559,
+      1.677
+    ],
+    "origin_from_min_corner": [
+      0.182,
+      0.276,
+      -0.001
+    ],
+    "extras": [
+      "script /Bill (6491 chars)"
+    ]
+  },
+  "people/Walking Bill.ttm": {
+    "alias": "Bill",
+    "size": [
+      0.341,
+      0.523,
+      1.677
+    ],
+    "origin_from_min_corner": [
+      0.142,
+      0.262,
+      -0.001
+    ],
+    "extras": [
+      "script /Bill (11803 chars)"
+    ]
+  },
+  "people/Bill on path.ttm": {
+    "alias": "Bill",
+    "size": [
+      0.341,
+      0.523,
+      1.677
+    ],
+    "origin_from_min_corner": [
+      0.142,
+      0.262,
+      -0.001
+    ],
+    "extras": [
+      "script /Bill (8270 chars)",
+      "custom data on /Bill/path: ['ABC_PATH_INFO', '__pathFingerPrint__', 'PATHCTRLPTS', 'PATHCTRLPTS_X', 'PATH', 'PATH_X', '__info__']",
+      "script /Bill/path/Script (464 chars)",
+      "custom data on /Bill/path/path__ctrlPt[0]: ['ABC_PATHCTRLPT']",
+      "custom data on /Bill/path/path__ctrlPt[1]: ['ABC_PATHCTRLPT']",
+      "custom data on /Bill/path/path__ctrlPt[2]: ['ABC_PATHCTRLPT']",
+      "custom data on /Bill/path/path__ctrlPt[3]: ['ABC_PATHCTRLPT']",
+      "custom data on /Bill/path/path__ctrlPt[4]: ['ABC_PATHCTRLPT']",
+      "custom data on /Bill/path/path__ctrlPt[5]: ['ABC_PATHCTRLPT']",
+      "custom data on /Bill/path/path__ctrlPt[6]: ['ABC_PATHCTRLPT']",
+      "custom data on /Bill/path/path__ctrlPt[7]: ['ABC_PATHCTRLPT']",
+      "custom data on /Bill/path/path__ctrlPt[8]: ['ABC_PATHCTRLPT']"
+    ]
+  },
+  "robots/non-mobile/Dobot Magician.ttm": {
+    "alias": "Dobot",
+    "size": [
+      0.334,
+      0.177,
+      0.325
+    ],
+    "origin_from_min_corner": [
+      0.025,
+      0.089,
+      0.246
+    ],
+    "extras": [
+      "script /Dobot/Script (2425 chars)",
+      "custom data on /Dobot/suctionCup/suctionCup_link2: ['activity']",
+      "script /Dobot/suctionCup/Script (3114 chars)"
+    ]
+  },
+  "robots/non-mobile/UR3.ttm": {
+    "alias": "UR3",
+    "size": [
+      0.258,
+      0.128,
+      0.732
+    ],
+    "origin_from_min_corner": [
+      0.194,
+      0.064,
+      0.043
+    ],
+    "extras": [
+      "script /UR3/Script (1421 chars)"
+    ]
+  },
+  "robots/non-mobile/UR5.ttm": {
+    "alias": "UR5",
+    "size": [
+      0.276,
+      0.146,
+      1.046
+    ],
+    "origin_from_min_corner": [
+      0.203,
+      0.073,
+      0.015
+    ],
+    "extras": [
+      "script /UR5/Script (1404 chars)"
+    ]
+  },
+  "robots/non-mobile/ABB IRB 360.ttm": {
+    "alias": "irb360",
+    "size": [
+      0.956,
+      1.051,
+      0.983
+    ],
+    "origin_from_min_corner": [
+      0.371,
+      0.5,
+      0.764
+    ],
+    "extras": [
+      "script /irb360/Script (12575 chars)",
+      "script /irb360/ikTip/Script (379 chars)"
+    ]
+  },
+  "components/grippers/suction pad.ttm": {
+    "alias": "suctionPad",
+    "size": [
+      0.048,
+      0.048,
+      0.05
+    ],
+    "origin_from_min_corner": [
+      0.024,
+      0.024,
+      0.015
+    ],
+    "extras": [
+      "script /suctionPad/Script (3440 chars)"
+    ]
+  },
+  "components/sensors/Blob detection camera.ttm": {
+    "alias": "blobDetectionCamera",
+    "size": [
+      0.045,
+      0.112,
+      0.045
+    ],
+    "origin_from_min_corner": [
+      0.023,
+      0.056,
+      0.023
+    ],
+    "extras": [
+      "script /blobDetectionCamera/camera/Script (809 chars)"
+    ]
+  }
+}
