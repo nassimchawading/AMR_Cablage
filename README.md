@@ -51,9 +51,9 @@ Every installation is logged in [INSTALL_LOG.md](INSTALL_LOG.md).
       quality-control cell: conveyor + camera + UR5 arm)
 - [x] Part 5: occupancy grid (from `layout.py`) + A* planner; `tests\test_planner.py` (map picture
       `media\carte_chemins.png`); the youBot now waits at its dock in the workshop
-- [~] Part 6 (in progress): 3 walking workers + route following and avoidance
-      (`src\navigator.py`, test `tests\test_navigation.py`); last test froze CoppeliaSim, fix applied,
-      to be re-tested
+- [x] Part 6: 3 walking workers (they give way to the robot) + route following and avoidance
+      (`src\navigator.py`); `tests\test_navigation.py` PASSED: 3 legs, 0 contacts
+      (`media\navigation_test.png`)
 - [ ] Part 7: docking with ArUco + youBot arm pick / place
 - [ ] Part 8: mission manager (transport orders, state machine, charging)
 - [ ] Part 9: quality-control cell logic (camera decides OK / defect, UR5 sorts)

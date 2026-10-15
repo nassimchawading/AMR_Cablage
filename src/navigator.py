@@ -246,6 +246,7 @@ class Navigator:
         def to_wait(msg):
             nonlocal state, wait_t, last_try
             self.stop()
+            self.near_hist.clear()      # "closing" must only measure people moving, not our own approach
             state, wait_t, last_try = "WAIT", now, now
             stats["stops"] += 1
             event(msg)

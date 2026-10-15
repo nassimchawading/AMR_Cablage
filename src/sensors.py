@@ -32,8 +32,9 @@ class Sensors:
         out = []
         for s in self.lidar:
             res = self.sim.readVisionSensor(s)
-            if not res or len(res) < 3 or not res[2]:
-                continue                                  # no data yet (first simulation step)
+            if not isinstance(res, (list, tuple)) or len(res) < 3 or not res[2]:
+                continue                                  # no data this step (first step; the API can also
+                                                          # return a bare -1): the obstacle memory covers it
             u = np.asarray(res[2], dtype=float)
             w, h = int(u[0]), int(u[1])
             data = u[2:2 + 4 * w * h].reshape(-1, 4)     # x, y, z (sensor frame), distance

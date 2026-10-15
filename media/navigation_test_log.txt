@@ -1,0 +1,67 @@
+--> going to sertissage
+  [   2.3 s] somebody 0.96 m away -> speed limited to 0.2 m/s
+  [   9.8 s] somebody 1.18 m away -> speed limited to 0.2 m/s
+  [  10.0 s] somebody 1.15 m away -> speed limited to 0.2 m/s
+  [  15.9 s] somebody 0.99 m away -> speed limited to 0.2 m/s
+  [  19.8 s] somebody 0.96 m away -> speed limited to 0.2 m/s
+  [  21.1 s] obstacle 0.72 m ahead on the route -> stop
+  [  24.1 s] blocked 3 s -> re-planned around the obstacle (10.8 m)
+  [  28.2 s] somebody 1.01 m away -> speed limited to 0.2 m/s
+  [  32.5 s] somebody 1.18 m away -> speed limited to 0.2 m/s
+  [  32.7 s] somebody 1.19 m away -> speed limited to 0.2 m/s
+  [  36.9 s] obstacle 0.73 m ahead on the route -> stop
+  [  39.9 s] blocked 3 s -> re-planned around the obstacle (9.2 m)
+  [  50.4 s] somebody 0.88 m away -> speed limited to 0.2 m/s
+  [  51.5 s] obstacle 0.74 m ahead on the route -> stop
+  [  54.6 s] blocked 3 s -> re-planned around the obstacle (9.1 m)
+  [  70.1 s] somebody 0.55 m from the robot -> stop
+  [  72.7 s] way clear -> go on
+  [  93.3 s] obstacle 0.72 m ahead on the route -> stop
+  [  96.4 s] blocked 3 s -> re-planned around the obstacle (5.9 m)
+  [  97.7 s] obstacle 0.50 m ahead on the route -> stop
+  [  99.8 s] somebody keeps coming closer (0.43 m) -> move out of the way
+  [ 101.8 s] out of the way (1.01 m) -> waiting until the person has passed
+  [ 105.8 s] person not moving away -> re-planned around (5.6 m)
+  [ 119.3 s] somebody 0.79 m away -> speed limited to 0.2 m/s
+  [ 126.8 s] somebody 1.18 m away -> speed limited to 0.2 m/s
+  [ 126.9 s] somebody 1.18 m away -> speed limited to 0.2 m/s
+  [ 129.1 s] final approach
+  [ 131.3 s] goal reached
+    REACHED in 131.3 s (sim), 340.8 s real, 21.72 m, stops 6, escapes 1, re-plans 5, emergency stops 0, min dist to a worker 0.73 m, contacts: robot moving 0 / robot stopped 0 steps
+--> going to rebuts
+  [   1.7 s] somebody 1.02 m away -> speed limited to 0.2 m/s
+  [   9.1 s] obstacle 0.69 m ahead on the route -> stop
+  [  12.1 s] blocked 3 s -> re-planned around the obstacle (5.0 m)
+  [  22.3 s] obstacle 0.72 m ahead on the route -> stop
+  [  25.3 s] blocked 3 s -> re-planned around the obstacle (4.0 m)
+  [  44.0 s] final approach
+  [  46.8 s] goal reached
+    REACHED in 46.8 s (sim), 124.4 s real, 6.11 m, stops 2, escapes 0, re-plans 2, emergency stops 0, min dist to a worker 0.73 m, contacts: robot moving 0 / robot stopped 0 steps
+--> going to dock
+  [   0.0 s] somebody 0.82 m away -> speed limited to 0.2 m/s
+  [   6.1 s] somebody 1.19 m away -> speed limited to 0.2 m/s
+  [   6.2 s] somebody 1.17 m away -> speed limited to 0.2 m/s
+  [   6.3 s] somebody 1.17 m away -> speed limited to 0.2 m/s
+  [  20.4 s] obstacle 0.74 m ahead on the route -> stop
+  [  20.6 s] somebody keeps coming closer (0.54 m) -> move out of the way
+  [  24.0 s] out of the way (1.06 m) -> waiting until the person has passed
+  [  26.6 s] person not moving away -> re-planned around (6.5 m)
+  [  32.6 s] somebody 1.12 m away -> speed limited to 0.2 m/s
+  [  36.5 s] somebody 1.17 m away -> speed limited to 0.2 m/s
+  [  36.6 s] somebody 1.17 m away -> speed limited to 0.2 m/s
+  [  36.7 s] somebody 1.19 m away -> speed limited to 0.2 m/s
+  [  37.1 s] somebody 1.16 m away -> speed limited to 0.2 m/s
+  [  37.2 s] somebody 1.17 m away -> speed limited to 0.2 m/s
+  [  37.8 s] somebody 1.20 m away -> speed limited to 0.2 m/s
+  [  38.0 s] somebody 1.19 m away -> speed limited to 0.2 m/s
+  [  38.1 s] somebody 1.20 m away -> speed limited to 0.2 m/s
+  [  38.3 s] somebody 1.17 m away -> speed limited to 0.2 m/s
+  [  38.4 s] somebody 1.19 m away -> speed limited to 0.2 m/s
+  [  38.5 s] somebody 1.17 m away -> speed limited to 0.2 m/s
+  [  38.8 s] somebody 1.19 m away -> speed limited to 0.2 m/s
+  [  40.4 s] somebody 1.05 m away -> speed limited to 0.2 m/s
+  [  48.8 s] final approach
+  [  50.6 s] goal reached
+    REACHED in 50.6 s (sim), 132.9 s real, 11.12 m, stops 1, escapes 1, re-plans 1, emergency stops 0, min dist to a worker 0.73 m, contacts: robot moving 0 / robot stopped 0 steps
+Saved media\navigation_test.png
+RESULT: PASSED

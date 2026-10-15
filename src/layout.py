@@ -141,6 +141,11 @@ class Walker:
     role: str = ""
 
 
+# Workers give way to the robot (like real operators trained to work next to AMRs): a worker stops
+# while the robot's centre is in front of him, closer than YIELD_DIST and less than YIELD_WIDTH to
+# the side; after YIELD_MAX s he walks on anyway (the robot must then move out of his way).
+YIELD_DIST, YIELD_WIDTH, YIELD_MAX = 1.3, 0.7, 20.0
+
 # Part 6: walking workers, each one testing a different robot behaviour
 WALKERS = [
     Walker("operateur_allee", [(2.6, 6.1), (18.6, 6.1)], 0.8, 4.0, 4.0,

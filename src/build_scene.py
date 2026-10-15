@@ -195,6 +195,35 @@ def make_detectable(sim, model):
         sim.setObjectSpecialProperty(s, SENSED)
 
 
+YIELD_LUA = f"""
+-- added by build_scene.py: the worker stops while the AMR is right in front of him
+YIELD_DIST, YIELD_WIDTH, YIELD_MAX = {layout.YIELD_DIST}, {layout.YIELD_WIDTH}, {layout.YIELD_MAX}
+
+function robotAhead()
+    if not robotRef then robotRef=sim.getObject('/youBot_ref', {{noError=true}}) end
+    if robotRef==-1 then return false end
+    local b=sim.getObjectPosition(BillHandle)
+    local r=sim.getObjectPosition(robotRef)
+    local a=sim.getObjectOrientation(BillHandle)[3]
+    local dx, dy=r[1]-b[1], r[2]-b[2]
+    local f=dx*math.cos(a)+dy*math.sin(a)
+    local l=-dx*math.sin(a)+dy*math.cos(a)
+    return f>0 and f<YIELD_DIST and math.abs(l)<YIELD_WIDTH
+end
+
+function yieldToRobot()
+    local st=sim.getSimulationTime()
+    if robotAhead() then
+        moveBody()
+        while robotAhead() and sim.getSimulationTime()-st<YIELD_MAX do
+            sim.step()
+        end
+    end
+    return sim.getSimulationTime()-st
+end
+"""
+
+
 def create_walker(sim, w, models_dir, parent):
     """Library 'Bill on path' walking our own route: replace its path, set speed and pauses."""
     h = sim.loadModel(models_dir + "people/Bill on path.ttm")
@@ -220,6 +249,11 @@ def create_walker(sim, w, models_dir, parent):
     # the library model stops at 2 "pause points" placed for ITS original path; they would make
     # Bill stop at random places on our route: unregister them (pauses only at the route ends)
     txt = re.sub(r"\n\s*pausePoints\[\d\]=\{[^\n]*\}", "", txt)
+    # Bill gives way to the robot: before each walking step, wait while the robot is in front of him
+    txt = txt.replace("function sysCall_thread()", YIELD_LUA + "\nfunction sysCall_thread()", 1)
+    for loop in ("while dist<pathL do", "while dist>0 do"):       # (script text has \r\n line ends)
+        txt = re.sub(rf"({re.escape(loop)}\r?\n)", r"\1            st=st+yieldToRobot()\n", txt, count=1)
+    assert txt.count("st=st+yieldToRobot()") == 2, "Bill script changed: yield hooks not inserted"
     sim.setObjectStringParam(s, sim.scriptstringparam_text, txt)
     make_detectable(sim, h)
     # The walker is moved by small "teleports" every step. If his body is respondable, walking into
@@ -278,6 +312,8 @@ def main():
             t = text.generateTextShape(lb.text, list(lb.color), lb.height, True)
             sim.setObjectPosition(t, [lb.x, lb.y, 0.006], sim.handle_world)
             sim.setObjectParent(t, groups[lb.group], True)
+            for o in sim.getObjectsInTree(t, sim.handle_all, 0):     # paint on the floor: the sonars
+                sim.setObjectSpecialProperty(o, 0)                   # detected the letters (phantom obstacles)
         print(f"Placed {len(layout.LABELS)} floor labels.")
     except Exception as e:  # labels are decoration: never block the build for them
         print("Labels skipped:", e)
