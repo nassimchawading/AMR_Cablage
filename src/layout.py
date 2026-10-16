@@ -436,7 +436,9 @@ def inspection_conveyor(name, x0, x1, y, width=0.5, h=PICK_H):
         for side in (-1, 1):
             box(name + "_pied", (0.05, 0.05, leg_h), (xx, y + side * (width / 2 - 0.03), leg_h / 2), C["dark"])
         box(name + "_traverse", (0.05, width, 0.05), (xx, y, 0.12), C["dark"])
-    box(name + "_butee", (0.04, width + 0.06, 0.12), (x1 + 0.02, y, h + 0.04), C["red"])
+    # end stop: belt width, just tall enough to stop the totes (a wider / taller one was hit by the
+    # UR5's upper arm reaching down to the tote, Part 9)
+    box(name + "_butee", (0.04, width, 0.03), (x1 + 0.02, y, h - 0.005), C["red"])     # belt top ~0.43 -> 0.46
     box(name + "_moteur", (0.25, 0.18, 0.18), (x0 + 0.3, y - width / 2 - 0.09, h - 0.25), C["bin"])
 
 

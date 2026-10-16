@@ -36,7 +36,7 @@ def main():
     try:
         cell = QCCell(sim, simIK)
         while sim.getSimulationTime() < TIMEOUT and cell.stats["sorted"] < len(totes):
-            cell.update()
+            cell.tick()
             if not saved and cell.last_image is not None:
                 tags = find_tags(cell.last_image)
                 if tags and abs(tags[0][1] - 128) < 10:

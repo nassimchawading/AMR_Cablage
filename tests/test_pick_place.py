@@ -58,7 +58,7 @@ def main():
 
         r = tr.load(st["marker_id"])
         f, l, z = tote_in_robot_frame()
-        check("tote loaded on the platform", r["ok"] and abs(f - CARRY[0]) < 0.04 and abs(l) < 0.04 and z < 0.3,
+        check("tote loaded on the platform", r["ok"] and abs(f - CARRY[0]) < 0.04 and abs(l - CARRY[1]) < 0.04 and z < 0.3,
               f"({r['info']}; tote at fwd {f:.3f} left {l:+.3f} up {z:.3f})")
 
         robot.move(-0.2, 0.0, 0.0)          # drive with the tote on board: 1 m back, 1 m forward

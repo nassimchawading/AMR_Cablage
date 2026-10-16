@@ -11,16 +11,25 @@ Where the tote is:
   - on the robot: CARRY, on the rear platform, behind the folded gripper's rest.
 """
 
-import layout
-from arm import Unreachable
+import math
 
-FIN_UP = layout.TOTE[2] + layout.FIN[2] / 2            # fin centre above the tote's bottom
-# grasp point 3 mm above the post's centre: with the gripper tilted 24-36 deg, the palm stays clear
+import layout
+from arm import J0_POS, Unreachable
+
+FIN_UP = layout.TOTE[2] + layout.FIN[2] / 2            # post centre above the tote's bottom
+# grasp point 3 mm above the post's centre: with the gripper tilted ~30 deg, the palm stays clear
 # of the post's top and the fingertips pass ~1 cm above the tote (gripper shapes measured in Part 7)
 GRASP_UP = 0.003
 TABLE_FIN_Z = layout.TABLE_H + FIN_UP + GRASP_UP
 PLATFORM_TOP = 0.154                                   # measured: a tote dropped on the platform rests there
-CARRY = (-0.20, 0.0, PLATFORM_TOP + FIN_UP + GRASP_UP)
+# The tote is locked in the hand while carried, so it must be released with the hand at the SAME
+# pitch as when it was grasped, or it lands tilted. Same pitch everywhere: GRASP_PHI. To reach the
+# platform behind the robot with that pitch, the arm turns its base to CARRY_ANGLE (limit +-169 deg)
+# instead of leaning back over itself; the tote then only turns about the vertical, staying level.
+GRASP_PHI = math.radians(30)
+CARRY_ANGLE, CARRY_RADIUS = math.radians(167), 0.38    # from the arm base: tote behind the gripper rest
+CARRY = (J0_POS[0] + CARRY_RADIUS * math.cos(CARRY_ANGLE), CARRY_RADIUS * math.sin(CARRY_ANGLE),
+         PLATFORM_TOP + FIN_UP + GRASP_UP)
 RELEASE = 0.006                                        # m: open the gripper this high above the resting height
 
 
@@ -40,13 +49,13 @@ class Transfer:
         try:
             src = pick_at(res)
             dst = place_at(res)
-            held = self.arm.pick(*src)
+            held = self.arm.pick(*src, phi=GRASP_PHI)
             if not held:
                 self.arm.gripper(close=False, wait=0.3)
                 self.arm.fold()
                 info = "grasp failed (nothing between the fingers)"
             else:
-                self.arm.place(dst[0], dst[1], dst[2] + RELEASE)
+                self.arm.place(dst[0], dst[1], dst[2] + RELEASE, phi=GRASP_PHI)
                 self.arm.fold()
                 info = f"{what} (docked in {res['time']} s)"
         except Unreachable as e:

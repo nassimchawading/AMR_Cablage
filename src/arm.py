@@ -89,6 +89,10 @@ class YouBotArm:
                 script = s
         self.gripper_script = script
         self.q = [sim.getJointPosition(j) for j in self.joints]
+        self.pads = [sim.getObject(robot_path + "/Rectangle5"), sim.getObject(robot_path + "/Rectangle6")]
+        self.palm = sim.getObject(robot_path + "/Rectangle7")     # last arm link (carries the fingers)
+        self.held = None
+        self._loose = None
 
     # ------------------------------------------------------------ low level
     def _step(self):
@@ -135,22 +139,58 @@ class YouBotArm:
         a = math.atan2(left - J0_POS[1], fwd - J0_POS[0])
         return fwd - APPROACH * math.cos(a), left - APPROACH * math.sin(a), z
 
-    def pick(self, fwd, left, z):
-        """Grasp the fin centred at (fwd, left, z) and lift it. Returns True if something is held."""
-        q, phi = ik(fwd, left, z)
+    # ------------------------------------------------------------ holding the tote
+    # Two fingertips on a small post hold a tote well against sliding, but the physics engine lets it
+    # PIVOT around the post (measured: 17 deg after lifting, 120 deg when swung over the platform,
+    # then it fell). So once the fingers have closed on the post (the finger opening proves it), the
+    # tote touching the pads is LOCKED to the gripper: it becomes a rigid part of the hand until
+    # release, then a normal physical object again (it settles on the surface by itself).
+    def _candidates(self):
+        """Loose objects of the workshop (dynamic shapes): the only things the hand can pick up."""
+        if self._loose is None:
+            shapes = self.sim.getObjectsInTree(self.sim.getObject("/Atelier"), self.sim.sceneobject_shape, 0)
+            self._loose = [s for s in shapes if self.sim.getObjectInt32Param(s, self.sim.shapeintparam_static) == 0]
+        return self._loose
+
+    def _lock(self):
+        for c in self._candidates():
+            res = self.sim.checkDistance(c, self.pads[0], 0.01)
+            if res[0] > 0 and res[1][6] < 0.004:                     # touching the finger pad
+                self.held = (c, self.sim.getObjectParent(c))
+                self.sim.setObjectInt32Param(c, self.sim.shapeintparam_static, 1)
+                self.sim.setObjectInt32Param(c, self.sim.shapeintparam_respondable, 0)
+                self.sim.setObjectParent(c, self.palm, True)
+                self.sim.resetDynamicObject(c)
+                return True
+        return False
+
+    def _unlock(self):
+        if self.held:
+            c, parent = self.held
+            self.sim.setObjectParent(c, parent, True)
+            self.sim.setObjectInt32Param(c, self.sim.shapeintparam_static, 0)
+            self.sim.setObjectInt32Param(c, self.sim.shapeintparam_respondable, 1)
+            self.sim.resetDynamicObject(c)
+            self.held = None
+
+    def pick(self, fwd, left, z, phi=None):
+        """Grasp the post centred at (fwd, left, z) and lift it. Returns True if a tote is held.
+        phi: gripper pitch (rad); use the SAME pitch to place the tote, so that it lands level."""
+        q, phi = ik(fwd, left, z) if phi is None else ik(fwd, left, z, phi, phi)
         self.gripper(close=False, wait=0.3)
         self.go(*self._approach_point(fwd, left, z, phi), phi=phi)
         self.move_joints(q, 1.0)
         self.gripper(close=True)
-        held = self.opening() < EMPTY_CLOSED - 0.004    # fingers stopped by the post (3 cm: about -0.009)
-        self.go(fwd, left, z + LIFT, phi=None, duration=1.0)
+        held = self.opening() < EMPTY_CLOSED - 0.004 and self._lock()   # fingers stopped by the post (~-0.009)
+        self.go(fwd, left, z + LIFT, duration=1.0)        # free pitch in between: the tote is locked
         return held
 
-    def place(self, fwd, left, z):
-        """Lower the held tote so that the fin centre ends at (fwd, left, z), release, back off."""
-        q, phi = ik(fwd, left, z)
+    def place(self, fwd, left, z, phi=None):
+        """Lower the held tote so that the post centre ends at (fwd, left, z), release, back off."""
+        q, phi = ik(fwd, left, z) if phi is None else ik(fwd, left, z, phi, phi)
         self.go(fwd, left, z + LIFT)
         self.move_joints(q, 1.0)
+        self._unlock()
         self.gripper(close=False)
         self.go(*self._approach_point(fwd, left, z, phi), phi=phi, duration=0.8)
 

@@ -54,9 +54,11 @@ Every installation is logged in [INSTALL_LOG.md](INSTALL_LOG.md).
 - [x] Part 6: 3 walking workers (they give way to the robot) + route following and avoidance
       (`src\navigator.py`); `tests\test_navigation.py` PASSED: 3 legs, 0 contacts
       (`media\navigation_test.png`)
-- [ ] Part 7: docking with ArUco + youBot arm pick / place
+- [x] Part 7: docking (camera ArUco + lidar, <= 5 mm) and youBot arm pick / carry / place of totes
+      on low transfer tables; `tests\test_errand.py`: full errand Magasin -> Coupe among workers
 - [ ] Part 8: mission manager (transport orders, state machine, charging)
-- [ ] Part 9: quality-control cell logic (camera decides OK / defect, UR5 sorts)
+- [x] Part 9: quality-control cell: camera decides OK / defect (OpenCV), conveyor stops at the
+      end stop, UR5 sorts onto the OK / REBUTS tables; runs in the background (`src\factory.py`)
 - [ ] Part 10: interface (live video, map, order tracking, send the robot on errands)
 - [ ] Part 11: evaluation + report material, demo video
 

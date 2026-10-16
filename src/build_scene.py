@@ -208,7 +208,7 @@ def qc_cell_extras(sim, group):
     - UR5 IK: dummy 'tip' on the suction face (pad frame: +z away from the face) and dummy 'target'
       (the pose Python asks the tip to reach);
     - light barrier at the conveyor end: ray proximity sensor beside the belt, looking across it at
-      tote height, 10 cm before the end stop: 'a tote is waiting at the end stop'."""
+      tote height, 1 cm before the end stop: 'a tote is waiting at the end stop'."""
     ur5 = sim.getObject(f"/{ROOT_NAME}/ur5")
     # the library base is a free dynamic body: once the arm leans out, the whole UR5 tipped off its
     # pedestal. A real UR5 is bolted down: base static (set here, at the end: earlier it got reset)
@@ -240,10 +240,10 @@ def qc_cell_extras(sim, group):
         sim.setJointPosition(j, math.radians(a))
         sim.setJointTargetPosition(j, math.radians(a))
     sim.setObjectMatrix(target, sim.getObjectMatrix(tip, sim.handle_world), sim.handle_world)
-    # light barrier: ray across the belt, 10 cm before the end stop, 3 cm above the belt
+    # light barrier: ray across the belt, 1 cm before the end stop (the belt stops when it sees a tote)
     ray = sim.createProximitySensor(sim.proximitysensor_ray, 16, 0, [0] * 8,
                                     [0.0, 0.6, 0.01, 0.01, 0.01, 0.01, 0.0, 0.01, 0.01, 0.0, 0.0, 0.0, 0.002, 0.0, 0.0])
-    sim.setObjectMatrix(ray, frame_from_z([0.0, 1.0, 0.0], [layout.QC_X1 - 0.10, layout.QC_Y - 0.30, layout.PICK_H + 0.01]),
+    sim.setObjectMatrix(ray, frame_from_z([0.0, 1.0, 0.0], [layout.QC_X1 - 0.01, layout.QC_Y - 0.30, layout.PICK_H + 0.01]),
                         sim.handle_world)
     sim.setObjectAlias(ray, "barriere_fin_convoyeur")
     sim.setObjectParent(ray, group, True)
