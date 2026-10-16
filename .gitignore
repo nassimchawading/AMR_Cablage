@@ -10,7 +10,3 @@ __pycache__/
 # OS / editor clutter
 Thumbs.db
 desktop.ini
-
-# Personal assistant notes: kept on this machine only
-CLAUDE.md
-.claude/
