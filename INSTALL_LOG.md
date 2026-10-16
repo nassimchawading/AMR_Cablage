@@ -14,7 +14,7 @@ Python packages go ONLY in `.venv` (never global).
 |---|---|---|---|---|
 | 2026-10-15 | Git for Windows (installed by the user with the official installer, default options; adds `git` to PATH) | 2.56.0.windows.2 | C:\Program Files\Git | Windows Settings > Apps > Git > Uninstall (or `winget uninstall --id Git.Git`) |
 
-Note (2026-10-15): while checking winget, Claude ran `winget show ... --accept-source-agreements`, which
+Note (2026-10-15): while checking winget, `winget show ... --accept-source-agreements` was run, which
 accepted the Microsoft Store source terms without asking first. To undo: `winget source reset --force`
 (administrator terminal).
 
