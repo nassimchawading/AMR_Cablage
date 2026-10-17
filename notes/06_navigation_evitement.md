@@ -14,11 +14,7 @@ Modifications apportées au modèle de la bibliothèque :
 - trajet remplacé par le nôtre, vitesse et pauses réglées, « points de pause » d'origine supprimés ;
 - les opérateurs sont rendus **détectables** par le lidar et les ultrasons (invisibles par défaut) ;
 - ils sont **non « respondables »** : ils se déplacent par petits « téléportations » ; en contact
-  physique avec le robot, le moteur physique produisait des forces énormes (blocage de CoppeliaSim) ;
-- **ils cèdent le passage au robot** : un opérateur s'arrête tant que le centre du robot est devant
-  lui, à moins de 1,3 m et à moins de 0,7 m sur le côté (au plus 20 s, ensuite il repart). C'est le
-  comportement attendu d'opérateurs formés à travailler à côté d'AMR. La norme ISO 3691-4 rend le
-  robot responsable de ne pas heurter les personnes **lorsqu'il se déplace**.
+  physique avec le robot, le moteur physique produisait des forces énormes (blocage de CoppeliaSim).
 
 Les opérateurs ne figurent **pas** sur la carte : le robot doit les découvrir avec ses capteurs.
 
