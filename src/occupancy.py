@@ -56,11 +56,11 @@ def _model_origins():
 
 
 # ---------------------------------------------------------------- footprints of the layout
-def part_boxes():
+def part_boxes(parts=None):
     """World corners (8 x 3) of every solid Part of the layout (parent chains resolved)."""
     world = {}                                       # name -> (R, t)
     out = []
-    for p in layout.PARTS:
+    for p in layout.PARTS if parts is None else parts:
         r_loc, t_loc = rot_matrix(*p.rot), np.array(p.pos, float)
         if p.parent:
             r_par, t_par = world[p.parent]
@@ -75,11 +75,11 @@ def part_boxes():
     return out
 
 
-def model_boxes():
+def model_boxes(models=None):
     """World corners of every obstacle-like library Model of the layout."""
     origins = _model_origins()
     out = []
-    for m in layout.MODELS:
+    for m in layout.MODELS if models is None else models:
         if m.key in NOT_OBSTACLES:
             continue
         rel, size = layout.LIB[m.key]
@@ -115,10 +115,11 @@ class OccupancyGrid:
         self.cost[self.lethal] = 1.0
 
     @classmethod
-    def from_layout(cls):
+    def from_layout(cls, parts=None, models=None):
+        """Map of the workshop (default) or of another scene described with layout's helpers."""
         w, h = int(round((X1 - X0) / RES)), int(round((Y1 - Y0) / RES))
         occ = np.zeros((h, w), bool)
-        for _, corners in part_boxes() + model_boxes():
+        for _, corners in part_boxes(parts) + model_boxes(models):
             if corners[:, 2].max() < 0.02 or corners[:, 2].min() > ROBOT_HEIGHT:
                 continue                              # below the floor surface or above the robot
             i0, j0 = cls.to_cell_static(corners[:, 0].min(), corners[:, 1].min())

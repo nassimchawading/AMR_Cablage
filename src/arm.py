@@ -77,8 +77,9 @@ def fk(q):
 
 
 class YouBotArm:
-    def __init__(self, sim, robot_path="/youBot", log=print):
+    def __init__(self, sim, robot_path="/youBot", log=print, world="/Atelier"):
         self.sim, self.log = sim, log
+        self.world = world                  # model holding the loose objects (totes): workshop or demo arena
         self.joints = [sim.getObject(f"{robot_path}/youBotArmJoint{i}") for i in range(5)]
         self.finger = sim.getObject(robot_path + "/youBotGripperJoint2")
         script = None
@@ -148,7 +149,7 @@ class YouBotArm:
     def _candidates(self):
         """Loose objects of the workshop (dynamic shapes): the only things the hand can pick up."""
         if self._loose is None:
-            shapes = self.sim.getObjectsInTree(self.sim.getObject("/Atelier"), self.sim.sceneobject_shape, 0)
+            shapes = self.sim.getObjectsInTree(self.sim.getObject(self.world), self.sim.sceneobject_shape, 0)
             self._loose = [s for s in shapes if self.sim.getObjectInt32Param(s, self.sim.shapeintparam_static) == 0]
         return self._loose
 

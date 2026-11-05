@@ -36,6 +36,29 @@ RELEASE = 0.006                                        # m: open the gripper thi
 class Transfer:
     def __init__(self, sim, robot, sensors, docker, arm, log=print):
         self.sim, self.robot, self.sensors, self.docker, self.arm, self.log = sim, robot, sensors, docker, arm, log
+        self.clamped = None                 # (tote, its parent) while it is clamped on the platform
+
+    # The platform is flat: while the robot drives (stops, dodges) a loose tote slid 2.3 cm sideways, and
+    # the gripper (opens 7 cm around a 3 cm post) then missed it at the unload (demo arena). A real AMR
+    # holds its load with guides or a clamp: here the tote is clamped (locked to the robot's body, the
+    # same way the gripper holds it) from the end of the load until just before the arm takes it again.
+    def _clamp(self, tote):
+        self.clamped = (tote, self.sim.getObjectParent(tote))
+        self.sim.setObjectInt32Param(tote, self.sim.shapeintparam_static, 1)
+        self.sim.setObjectInt32Param(tote, self.sim.shapeintparam_respondable, 0)
+        self.sim.setObjectParent(tote, self.robot.model, True)
+        self.sim.resetDynamicObject(tote)
+
+    def _unclamp(self):
+        if self.clamped:
+            tote, parent = self.clamped
+            self.sim.setObjectParent(tote, parent, True)
+            self.sim.setObjectInt32Param(tote, self.sim.shapeintparam_static, 0)
+            self.sim.setObjectInt32Param(tote, self.sim.shapeintparam_respondable, 1)
+            self.sim.resetDynamicObject(tote)
+            self.clamped = None
+            for _ in range(4):              # let it settle on the platform before the arm comes
+                self.sim.step()
 
     def _table_fin(self, res):
         a, _ = self.docker.face()
@@ -49,7 +72,10 @@ class Transfer:
         try:
             src = pick_at(res)
             dst = place_at(res)
+            if src == CARRY:
+                self._unclamp()
             held = self.arm.pick(*src, phi=GRASP_PHI)
+            tote = self.arm.held[0] if held and self.arm.held else None
             if not held:
                 self.arm.gripper(close=False, wait=0.3)
                 self.arm.fold()
@@ -57,6 +83,8 @@ class Transfer:
             else:
                 self.arm.place(dst[0], dst[1], dst[2] + RELEASE, phi=GRASP_PHI)
                 self.arm.fold()
+                if dst == CARRY and tote is not None:
+                    self._clamp(tote)
                 info = f"{what} (docked in {res['time']} s)"
         except Unreachable as e:
             self.arm.fold()

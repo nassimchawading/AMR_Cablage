@@ -2,10 +2,12 @@ r"""Render pictures of the current CoppeliaSim scene into media\ (top plan + 3D 
 
 Uses a temporary vision sensor (a camera) that is removed afterwards.
 Run (PowerShell, from the project folder):
-  .\.venv\Scripts\python.exe src\snapshot.py
+  .\.venv\Scripts\python.exe src\snapshot.py           (workshop: scenes\atelier_cablage.ttt open)
+  .\.venv\Scripts\python.exe src\snapshot.py --demo    (youBot demo arena: scenes\test_youbot.ttt open)
 """
 
 import struct
+import sys
 import zlib
 from pathlib import Path
 
@@ -22,6 +24,11 @@ VIEWS = {
     "atelier_vue_haut":    ((10.0, 18.0, 11.0), (10.0, 6.0, 0.0), (1280, 720), 60),
     "zoom_controle_qualite": ((9.6, 6.6, 2.6), (9.9, 2.6, 0.5), (1280, 720), 60),
     "zoom_ur5":              ((12.2, 4.2, 1.5), (10.95, 3.0, 0.9), (960, 720), 55),
+}
+DEMO_VIEWS = {
+    "demo_vue_dessus": ((5.0, 3.99, 13.5), (5.0, 4.0, 0.0), (1100, 900), 45),
+    "demo_vue_3d":     ((5.0, -5.5, 8.5), (5.0, 3.6, 0.0), (1280, 720), 60),
+    "demo_zoom_robot": ((3.2, -0.2, 1.8), (1.6, 2.2, 0.2), (1280, 720), 55),
 }
 
 
@@ -55,7 +62,7 @@ def render(sim, eye, target, res, angle):
 def main():
     sim = RemoteAPIClient().require("sim")
     MEDIA.mkdir(exist_ok=True)
-    for name, (eye, target, res, angle) in VIEWS.items():
+    for name, (eye, target, res, angle) in (DEMO_VIEWS if "--demo" in sys.argv else VIEWS).items():
         img, r = render(sim, eye, target, res, angle)
         out = MEDIA / f"{name}.png"
         save_png(out, img, r[0], r[1])
