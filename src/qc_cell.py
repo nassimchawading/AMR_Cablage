@@ -14,12 +14,17 @@ Flow of a harness tote:
      measured distance also gives its exact sideways position on the belt.
   3. the UR5 takes the oldest decision from the queue, picks the tote by its handle post with the
      suction pad, and puts it on the OK table (-> Expédition) or the REBUTS table (-> rework):
-     first on the front spot (where the AMR picks it up), then on the buffer spot behind it.
+     on the front spot (where the AMR picks it up). If that spot is taken, the tote waits at the end
+     stop (the belt stays stopped) until the AMR has taken the other one.
 
 UR5 motion: the suction pad moves along STRAIGHT LINES between waypoints. At every simulation step
 the target is moved a little along the line and CoppeliaSim's IK solver (simIK, damped least
 squares) computes the joint angles, sent to the arm's position-controlled motors. The pad always
-points down with the same yaw, so the tote keeps its orientation.
+points down with the same yaw, so the tote keeps its orientation. The long transfers between the
+belt end and the tables are joint-space moves instead (see move_to: a straight line close to the
+UR5's base folded the arm onto the conveyor). After every carrying move the REAL pad position is
+checked: an arm that did not reach its target stops the cell with a fault, it never releases the
+tote somewhere else.
 """
 
 import math
@@ -31,7 +36,11 @@ import layout
 
 HOME_DEG = [-20, 83, -67, -107, 90, -20]        # pad down above the conveyor end (IK, Part 9)
 SPEED = 0.30                                    # m/s, pad speed along a line
-CLEAR_Z = 0.68                                  # travel height between conveyor and tables
+CLEAR_Z = 0.68                                  # travel height above the conveyor (clears the end stop)
+# travel height above each table spot (same order as layout.QC_SLOTS_DY), limited by the UR5's reach:
+# the front spot is 0.73 m from the UR5 base; at 0.68 the arm (pad down) is almost straight and the IK
+# stopped 7-9 cm short -> 0.58 (carried tote's bottom 0.45, the table top 0.25)
+SLOT_CLEAR_Z = (0.58,)
 BELT_POST_TOP = 0.56                            # post top of a tote on the belt (measured: post centre 0.535)
 TABLE_POST_TOP = layout.TABLE_H + layout.TOTE[2] + layout.FIN[2]
 END_X = layout.QC_X1 - layout.TOTE[0] / 2       # tote centre against the end stop
@@ -43,6 +52,32 @@ GREEN = ((45, 120, 80), (85, 255, 255))
 RED = [((0, 120, 80), (8, 255, 255)), ((172, 120, 80), (180, 255, 255))]
 MIN_AREA = 40                                   # px, tag blob (a 5 cm tag is ~400 px in the 256 x 256 image)
 BAND = 25                                       # px: "in the middle of the image" band (half width)
+MISS_MAX = 0.03                                 # m: real pad farther than this from a carry target = arm blocked
+
+
+def check_totes(sim, root="/Atelier"):
+    """Tests: TRUE positions of the QC totes. They reach the arm in order of decreasing x on the belt;
+    each table takes len(QC_SLOTS_DY) totes, the others must wait upright at the end stop.
+    Returns (number of totes where they should be, total, printable lines)."""
+    order = sorted(range(len(layout.QC_TOTES)), key=lambda i: -layout.QC_TOTES[i][0])
+    room = {True: len(layout.QC_SLOTS_DY), False: len(layout.QC_SLOTS_DY)}
+    good, lines = 0, []
+    for i in order:
+        ok = layout.QC_TOTES[i][1]
+        h = sim.getObject(f"{root}/bac_faisceau" + (f"_{i}" if i else ""))
+        x, y, z = sim.getObjectPosition(h, sim.handle_world)
+        upright = sim.getObjectMatrix(h, sim.handle_world)[10] > 0.98
+        if room[ok] > 0:
+            room[ok] -= 1
+            where = f"on the {'OK' if ok else 'REBUTS'} table"
+            on = abs(x - TABLES[ok]) < 0.4 and abs(y - layout.DROP_BOT_Y) < 0.25 and abs(z - 0.355) < 0.02
+        else:
+            where = "waiting at the end stop (its table is full)"
+            on = abs(x - END_X) < 0.15 and abs(y - layout.QC_Y) < 0.15
+        good += on and upright
+        lines.append(f"  QC tote {i} ({'OK' if ok else 'DEFECT'}) at ({x:.3f}, {y:.3f}, {z:.3f}): expected {where} -> "
+                     f"{'yes' if on and upright else 'NO'}{'' if upright else ', TIPPED OVER'}")
+    return good, len(order), lines
 
 
 def find_tags(img):
@@ -90,6 +125,8 @@ class QCCell:
         self.job = None                 # current arm job (generator), advanced one step per tick
         self.full_reported = False
         self.dropped = False
+        self.miss = 0.0                 # m, real pad <-> target after the last move
+        self.fault = None               # set when the arm is blocked: the cell stops
 
     # ------------------------------------------------------------ sensors
     def camera_image(self):
@@ -141,22 +178,56 @@ class QCCell:
         """Target pose: pad face at p, pointing down (tip +z up), fixed yaw (x along the world x)."""
         return [1.0, 0.0, 0.0, p[0], 0.0, 1.0, 0.0, p[1], 0.0, 0.0, 1.0, p[2]]
 
-    def move_to(self, p, speed=SPEED, carrying=False):
+    def _ik_line(self, start, p, s):
+        """Move the IK world's target to the point at fraction s of the line start -> p and solve."""
+        q = [a + s * (b - a) for a, b in zip(start, p)]
+        self.simIK.setObjectMatrix(self.env, self.ik_target, self._pose(q))
+        self.simIK.handleGroup(self.env, self.group)
+
+    def _ik_settle(self, p, tol=0.002, tries=60):
+        """Keep solving at the final target until the IK tip is really there: the damped least squares
+        solver only goes part of the way per call, and at the end of a long move it lagged 4-7 cm
+        behind (measured); returns the remaining error (m)."""
+        for _ in range(tries):
+            m = self.simIK.getObjectMatrix(self.env, self.ik_tip)
+            err = math.dist((m[3], m[7], m[11]), p)
+            if err < tol:
+                break
+            self.simIK.handleGroup(self.env, self.group)
+        return err
+
+    def move_to(self, p, speed=SPEED, carrying=False, joint_space=False):
         """Straight line of the pad to p, ONE simulation step per iteration (generator: the caller
         steps the simulation, so the cell never blocks the rest of the factory).
         carrying=True: check at every step that the tote is still on the pad; if it fell, stop the
-        move and set self.dropped (the job then goes back for it)."""
+        move and set self.dropped (the job then goes back for it).
+        joint_space=True (transfers between the belt and the tables): the IK world still walks the
+        straight line, but only to find the FINAL joint angles; the real arm then goes there with all
+        its joints turning together (linear in joint space). On the straight line from the belt end
+        to a table spot close to the UR5's base, the IK folded the arm and its upper arm came down on
+        the conveyor and its end stop: the base joint stalled at -26 deg (target -141) and the tote
+        was released above the belt. In joint space the arm keeps a shape between its pick and drop
+        shapes, and the pad stays pointing down (shoulder + elbow + wrist angles change linearly, so
+        their sum - the pad's tilt - stays the same)."""
         m = self.simIK.getObjectMatrix(self.env, self.ik_tip)
         start = (m[3], m[7], m[11])
         n = max(1, int(math.dist(start, p) / (speed * self.sim.getSimulationTimeStep())))
+        if joint_space:
+            q0 = [self.simIK.getJointPosition(self.env, ij) for ij in self.ik_joints]
+            for k in range(1, n + 1):
+                self._ik_line(start, p, k / n)
+            self._ik_settle(p)
+            q1 = [self.simIK.getJointPosition(self.env, ij) for ij in self.ik_joints]
         for k in range(1, n + 1):
             s = k / n
             s = s * s * (3 - 2 * s)
-            q = [a + s * (b - a) for a, b in zip(start, p)]
-            self.simIK.setObjectMatrix(self.env, self.ik_target, self._pose(q))
-            self.simIK.handleGroup(self.env, self.group)
-            for j, ij in zip(self.joints, self.ik_joints):
-                self.sim.setJointTargetPosition(j, self.simIK.getJointPosition(self.env, ij))
+            if joint_space:
+                for j, a, b in zip(self.joints, q0, q1):
+                    self.sim.setJointTargetPosition(j, a + s * (b - a))
+            else:
+                self._ik_line(start, p, s)
+                for j, ij in zip(self.joints, self.ik_joints):
+                    self.sim.setJointTargetPosition(j, self.simIK.getJointPosition(self.env, ij))
             yield
             if carrying and not self.holding():
                 self.dropped = True
@@ -166,6 +237,8 @@ class QCCell:
                            f"joint speeds {v} deg/s, {k}/{n} of the move")
                 return
         yield from self.wait(0.5)               # let the motors catch up
+        # the IK world always reaches its target: check that the REAL pad did too
+        self.miss = math.dist(self.sim.getObjectPosition(self.tip, self.sim.handle_world), p)
 
     def wait(self, seconds):
         for _ in range(int(seconds / self.sim.getSimulationTimeStep())):
@@ -175,6 +248,8 @@ class QCCell:
     def tick(self):
         """Call ONCE PER SIMULATION STEP (before sim.step()): the camera inspects, and the arm advances
         its current job by one step, or starts sorting a tote waiting at the end stop."""
+        if self.fault:
+            return
         self.inspect()
         waiting, y = self.tote_waiting()
         if waiting and self.belt_on:
@@ -190,6 +265,10 @@ class QCCell:
         if waiting and self.queue:
             self.job = self._sort(y)
 
+    def taken(self, ok):
+        """The AMR took the tote from the OK (ok=True) or REBUTS table: its spot is free again."""
+        self.used[ok] = max(0, self.used[ok] - 1)
+
     def _sort(self, y):
         ok = self.queue.pop(0)
         slot = self.used[ok]
@@ -202,6 +281,7 @@ class QCCell:
             return
         self.full_reported = False
         tx, ty = TABLES[ok], layout.DROP_BOT_Y + layout.QC_SLOTS_DY[slot]
+        tz = SLOT_CLEAR_Z[slot]
         self.event(f"UR5: tote at the end stop (y {y:.3f}) -> {'OK' if ok else 'REBUTS'} table, spot {slot + 1}")
         yield from self.move_to((END_X, y, CLEAR_Z))
         yield from self.move_to((END_X, y, BELT_POST_TOP + 0.03), speed=0.15)
@@ -220,21 +300,29 @@ class QCCell:
             self.event("UR5: suction failed, retrying")
             return
         self.dropped = False
-        for target, speed in (((END_X, y, CLEAR_Z), 0.2), ((tx, ty, CLEAR_Z), SPEED),
-                              ((tx, ty, TABLE_POST_TOP + 0.03), 0.15), ((tx, ty, TABLE_POST_TOP + 0.004), 0.05)):
-            yield from self.move_to(target, speed, carrying=True)
+        for target, speed, joint_space in (((END_X, y, CLEAR_Z), 0.2, False), ((tx, ty, tz), SPEED, True),
+                                           ((tx, ty, TABLE_POST_TOP + 0.03), 0.15, False),
+                                           ((tx, ty, TABLE_POST_TOP + 0.004), 0.05, False)):
+            yield from self.move_to(target, speed, carrying=True, joint_space=joint_space)
+            if not self.dropped and self.miss > MISS_MAX:
+                # the arm is blocked (collision): never release the tote somewhere else; stop the cell
+                # (a real cell stops on such a fault and waits for an operator)
+                self.fault = (f"UR5 BLOCKED: pad {self.miss * 100:.0f} cm from its target "
+                              f"({target[0]:.2f}, {target[1]:.2f}, {target[2]:.2f}), cell stopped")
+                self.event(self.fault)
+                return
             if target[0] == END_X and self.belt_on is False and not self.dropped:
                 self.belt(True)                  # tote lifted off the belt: bring the next one
             if self.dropped:                     # it falls back on the belt and rides to the end stop:
                 self.suction(False)              # go back to the start position and pick it again
                 self.stats["dropped"] += 1
                 self.queue.insert(0, ok)
-                yield from self.move_to((END_X, layout.QC_Y, CLEAR_Z))
+                yield from self.move_to((END_X, layout.QC_Y, CLEAR_Z), joint_space=True)
                 return
         self.suction(False)
         yield from self.wait(0.3)
-        yield from self.move_to((tx, ty, CLEAR_Z), speed=0.2)
-        yield from self.move_to((END_X, layout.QC_Y, CLEAR_Z))
+        yield from self.move_to((tx, ty, tz), speed=0.2)
+        yield from self.move_to((END_X, layout.QC_Y, CLEAR_Z), joint_space=True)
         self.used[ok] += 1
         self.stats["sorted"] += 1
         self.event(f"UR5: tote placed on the {'OK' if ok else 'REBUTS'} table")

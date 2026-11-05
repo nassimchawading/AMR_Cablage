@@ -2,8 +2,9 @@ r"""Part 9 test: the quality-control cell sorts the harness totes by itself.
 
 The conveyor brings the 3 totes (tags: green, red, green) under the QC camera; the Python cell
 (src\qc_cell.py) decides OK / defect from the image and the UR5 puts each tote on the OK table or
-the REBUTS table. Check (true positions from the simulator): every tote on the right table,
-standing upright. Saves media\qc_camera.png (camera view with the detected tag).
+the REBUTS table (one spot per table: the second OK tote must WAIT at the end stop, nobody takes
+the first one away here). Check (true positions from the simulator, qc_cell.check_totes): each
+tote where it should be, standing upright, no cell fault. Saves media\qc_camera.png.
 
 Needs scenes\atelier_cablage.ttt open. Run (PowerShell, from the project folder):
   .\.venv\Scripts\python.exe tests\test_qc_cell.py
@@ -19,7 +20,7 @@ import cv2
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
 import layout
-from qc_cell import QCCell, TABLES, find_tags
+from qc_cell import QCCell, check_totes, find_tags
 
 TIMEOUT = 150.0
 
@@ -35,7 +36,10 @@ def main():
     saved = False
     try:
         cell = QCCell(sim, simIK)
-        while sim.getSimulationTime() < TIMEOUT and cell.stats["sorted"] < len(totes):
+        n_ok = sum(ok for _, ok in totes)
+        expected = min(n_ok, len(layout.QC_SLOTS_DY)) + min(len(totes) - n_ok, len(layout.QC_SLOTS_DY))
+        while sim.getSimulationTime() < TIMEOUT and not cell.fault and not (
+                cell.stats["sorted"] >= expected and (expected == len(totes) or cell.full_reported)):
             cell.tick()
             if not saved and cell.last_image is not None:
                 tags = find_tags(cell.last_image)
@@ -49,21 +53,13 @@ def main():
             sim.step()
         for _ in range(20):
             sim.step()
-        good = 0
-        for h, ok in totes:
-            x, y, z = sim.getObjectPosition(h, sim.handle_world)
-            m = sim.getObjectMatrix(h, sim.handle_world)
-            upright = m[10] > 0.98
-            on = abs(x - TABLES[ok]) < layout.TABLE_SIZE[0] / 2 and abs(y - layout.DROP_BOT_Y) < layout.TABLE_SIZE[1] / 2 \
-                and abs(z - (layout.TABLE_H + layout.TOTE[2] + layout.FIN[2] / 2)) < 0.02
-            good += on and upright
-            print(f"{sim.getObjectAlias(h)} tag {'green' if ok else 'red  '} -> at ({x:.3f}, {y:.3f}, {z:.3f}) "
-                  f"{'on the ' + ('OK' if ok else 'REBUTS') + ' table' if on else 'NOT on its table'}{'' if upright else ', TIPPED OVER'}")
+        good, total, lines = check_totes(sim)
+        print("\n".join(lines))
         print(f"inspected {cell.stats['inspected']}, sorted {cell.stats['sorted']}, suction retries {cell.stats['failed']}, "
-              f"time {sim.getSimulationTime():.1f} s")
+              f"fault {cell.fault}, time {sim.getSimulationTime():.1f} s")
     finally:
         sim.stopSimulation()
-    print("RESULT:", "PASSED" if good == len(totes) else "FAILED")
+    print("RESULT:", "PASSED" if good == total and not cell.fault else "FAILED")
 
 
 if __name__ == "__main__":
