@@ -1,0 +1,804 @@
+% ---------------------------------------------------------------------------
+% AMR dans un atelier de câblage -- Planification, algorithmes, méthodes,
+% bibliothèques et justification des choix.
+%
+% Compilation : pdflatex (2 passes, pour la table des matières), par ex. sur
+% Overleaf : téléverser ce fichier + les images de ..\media\ dans un dossier
+% "figures/" (ou garder l'arborescence du projet). Les figures absentes sont
+% remplacées par un cadre, le document compile quand même.
+% ---------------------------------------------------------------------------
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{../media/}{figures/}{media/}}
+\setlist{itemsep=2pt,topsep=4pt}
+\renewcommand{\arraystretch}{1.25}
+\floatname{algorithm}{Algorithme}
+\renewcommand{\algorithmicrequire}{\textbf{Entrées :}}
+\renewcommand{\algorithmicensure}{\textbf{Sortie :}}
+
+% figure facultative : image si elle existe, sinon un cadre avec son nom
+\newcommand{\figimg}[2]{%
+  \IfFileExists{../media/#2}{\includegraphics[width=#1\linewidth]{#2}}{%
+  \IfFileExists{figures/#2}{\includegraphics[width=#1\linewidth]{#2}}{%
+  \IfFileExists{media/#2}{\includegraphics[width=#1\linewidth]{#2}}{%
+  \fbox{\parbox{#1\linewidth}{\centering\vspace{1.5cm}\texttt{#2}\\(image à ajouter)\vspace{1.5cm}}}}}}}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+\title{\textbf{Robot mobile autonome (AMR) dans un atelier de câblage}\\[4pt]
+\large Planification du projet, algorithmes et méthodes,\\ bibliothèques utilisées et justification des choix}
+\author{Nassim Chawad\\ Module « Atelier intelligent »}
+\date{Novembre 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Ce document décrit comment a été conçu et construit un robot mobile autonome (AMR) qui transporte
+des bacs de matière (bobines, faisceaux) entre les postes d'un atelier de câblage simulé dans
+CoppeliaSim. Il présente la démarche suivie (découpage en parties, tests à chaque étape), puis,
+pour chaque fonction du robot (localisation, carte, planification de chemin, suivi du chemin et
+évitement d'obstacles, suivi et prédiction du mouvement des opérateurs, accostage, manipulation,
+cellule de contrôle qualité), l'algorithme retenu, sa
+formulation, ses paramètres et la raison de ce choix face aux alternatives. Une dernière partie
+résume les résultats des tests et les limites connues.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ===========================================================================
+\section{Contexte et cahier des charges}
+
+L'objectif est de simuler un AMR dans une usine de faisceaux électriques : le robot reçoit des
+ordres de transport (« bobines : Magasin $\rightarrow$ Coupe »), \emph{planifie lui-même} son
+chemin, \emph{évite} les obstacles imprévus, notamment des opérateurs qui marchent, s'accoste
+précisément aux postes, charge et décharge les bacs avec son bras, et diffuse un flux caméra en
+temps réel. Aucune contrainte technique n'était imposée : tous les choix ci-dessous sont des
+décisions de conception, prises au début du projet (partie 0) puis affinées.
+
+\paragraph{Décisions structurantes (partie 0).}
+\begin{enumerate}[label=\textbf{\Alph*.}]
+  \item \textbf{Carte connue, pas de SLAM.} Le plan de l'atelier est fixe et connu : la carte est
+        générée à partir de la description de l'atelier. Le lidar sert à détecter ce qui \emph{n'est
+        pas} sur la carte (personnes, objets égarés).
+  \item \textbf{Trois capteurs obligatoires :} lidar 2D (perception, accostage), ceinture
+        d'ultrasons (sécurité à courte portée, tout autour du robot), caméra (flux vidéo,
+        identification des postes par marqueurs ArUco).
+  \item \textbf{Chemin bloqué :} ralentir, s'arrêter et attendre, puis re-planifier après
+        quelques secondes ; s'écarter si une personne continue d'approcher.
+  \item \textbf{Scène lisible :} six postes de production + un dock de recharge, des rayonnages, des
+        opérateurs ; la scène doit clairement ressembler à une usine de câblage.
+  \item \textbf{Supervision :} à terme, une interface de suivi des ordres de transport et
+        des indicateurs d'évaluation.
+\end{enumerate}
+
+\paragraph{Flux de production simulé.}
+Magasin (bobines brutes) $\rightarrow$ Coupe/dénudage $\rightarrow$ Sertissage $\rightarrow$
+Assemblage (planches de câblage) $\rightarrow$ Test électrique (cellule de contrôle qualité)
+$\rightarrow$ Expédition, plus une table \textsc{Rebuts} (retour en Assemblage pour reprise) et le
+dock de recharge de l'AMR. L'atelier mesure $20\times12$\,m, avec une allée centrale de 2,5\,m.
+
+\begin{figure}[h]
+  \centering
+  \figimg{0.85}{atelier_vue_3d.png}
+  \caption{L'atelier de câblage simulé (CoppeliaSim).}
+\end{figure}
+
+% ===========================================================================
+\section{Démarche de planification du projet}
+
+\subsection{Découpage en parties testées une à une}
+Le projet a été construit \emph{incrémentalement} : chaque partie ajoute une seule capacité, avec
+un programme de test qui la valide avant de passer à la suivante. Cela évite d'empiler des erreurs
+et rend chaque résultat mesurable.
+
+\begin{table}[h]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}lLL@{}}
+\toprule
+\textbf{Partie} & \textbf{Contenu} & \textbf{Validation} \\
+\midrule
+0  & Cahier des charges, choix A--E, arborescence, journal d'installation & --- \\
+1  & Liaison Python $\leftrightarrow$ CoppeliaSim (API ZMQ, mode pas-à-pas) & \code{test\_connection} \\
+2  & Pilote du youBot (cinématique mécanum, localisation simulée) & \code{test\_drive}, \code{test\_square} \\
+3  & Capteurs : lidar, 8 ultrasons, caméra & \code{test\_sensors} \\
+4  & Scène de l'atelier, générée depuis une description unique & images de la scène \\
+5  & Carte d'occupation + planificateur A* & \code{test\_planner} (28/28 trajets) \\
+6  & Suivi de chemin + évitement des opérateurs ; puis suivi des opérateurs (filtre de Kalman) et
+     navigation par prédiction & \code{test\_navigation}, \code{test\_tracking}, \code{test\_errand} \\
+7  & Accostage ArUco + lidar, bras, prise et dépose & \code{test\_aruco}, \code{test\_docking}, \code{test\_pick\_place}, \code{test\_errand} \\
+8  & Gestionnaire de missions (ordres, batterie) & \emph{à venir} \\
+9  & Cellule de contrôle qualité (caméra + UR5) & \code{test\_qc\_cell} \\
+10 & Interface de supervision & \emph{à venir} \\
+11 & Évaluation, rapport, vidéo & \emph{à venir} \\
+\bottomrule
+\end{tabularx}
+\caption{Plan du projet et test de validation de chaque partie.}
+\end{table}
+
+\subsection{Principes de travail}
+\begin{itemize}
+  \item \textbf{Une seule source de vérité.} Tout l'atelier est décrit comme des données dans
+        \code{layout.py} (formes, modèles de bibliothèque, postes, opérateurs). Le même fichier sert
+        à construire la scène (\code{build\_scene.py}) \emph{et} à générer la carte du robot
+        (\code{occupancy.py}) : la scène et la carte ne peuvent pas diverger.
+  \item \textbf{Simulation pas-à-pas.} Python commande le simulateur pas par pas
+        ($\Delta t = 50$\,ms) : chaque décision est prise sur un état cohérent, les tests sont
+        reproductibles et la vitesse de calcul de Python n'influence pas la physique.
+  \item \textbf{Mesurer plutôt que supposer.} Les dimensions des modèles de bibliothèque, les
+        paramètres du bras, la hauteur de la plateforme, etc. ont été mesurés dans le simulateur
+        (scripts d'inspection) avant d'être utilisés.
+  \item \textbf{Traçabilité.} Chaque installation est consignée (version, emplacement, commande de
+        désinstallation) ; le code est versionné avec Git ; une note de rapport est écrite à la fin
+        de chaque partie.
+\end{itemize}
+
+% ===========================================================================
+\section{Environnement logiciel et bibliothèques}
+
+\subsection{Choix et justification}
+\begin{table}[h]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}lp{3.2cm}L@{}}
+\toprule
+\textbf{Outil} & \textbf{Rôle} & \textbf{Pourquoi ce choix} \\
+\midrule
+CoppeliaSim Edu 4.10 & Le « monde » : scène, physique, robot, capteurs simulés &
+  Gratuit pour l'enseignement, bibliothèque riche (youBot, UR5, lidar Hokuyo, convoyeurs, personnages
+  animés, marqueurs ArUco), plusieurs moteurs physiques, API externe. \\
+Python 3 & Le « cerveau » : perception, planification, commande &
+  Débogage simple, écosystème scientifique (NumPy, OpenCV), code lisible pour le rapport. \\
+API ZMQ Remote & Liaison Python $\leftrightarrow$ simulateur &
+  Client officiel, appelle toute l'API de CoppeliaSim depuis Python, mode pas-à-pas synchrone. \\
+NumPy & Calcul vectoriel &
+  Traitement des nuages de points lidar, transformations de repères, grilles. \\
+OpenCV & Vision et images &
+  Détection ArUco + \code{solvePnP}, segmentation couleur HSV, dilatation et transformée de
+  distance de la carte, affichage temps réel. \\
+simIK (CoppeliaSim) & Cinématique inverse du bras UR5 &
+  Solveur numérique intégré (moindres carrés amortis), adapté à un bras à 6 axes. \\
+Lua (dans la scène) & Petits scripts embarqués &
+  Animation des opérateurs, crochets de commande (pince, ventouse, convoyeur). \\
+\bottomrule
+\end{tabularx}
+\caption{Outils et bibliothèques.}
+\end{table}
+
+\subsection{Pourquoi pas ROS ?}
+L'architecture est \emph{modulaire et inspirée de ROS} (un module par fonction : capteurs, carte,
+planificateur, navigateur, accostage, bras), mais sans intergiciel. Pour un projet individuel en
+simulation, ROS~2 aurait ajouté une installation lourde (Linux ou WSL), la gestion des
+\emph{topics}, des messages et des \emph{launch files}, sans bénéfice fonctionnel ici : un seul
+programme commande un seul robot. Les modules Python correspondent chacun à un nœud ROS classique
+(\code{map\_server}, \code{global\_planner}, \code{local\_planner}, etc.) ; un passage à ROS~2 via
+le plugin \code{simROS2} de CoppeliaSim reste possible.
+
+\subsection{Pourquoi un planificateur maison plutôt qu'OMPL ?}
+CoppeliaSim intègre OMPL (planificateurs par échantillonnage : RRT, PRM\dots). Ces méthodes sont
+faites pour les grands espaces de configuration (bras à 6 axes). Pour un robot qui se déplace dans
+un plan avec une carte en grille, A* est \emph{optimal}, \emph{complet} et \emph{déterministe} (même
+chemin à chaque exécution), rapide (environ 15\,ms par trajet ici), et il prend directement en compte
+un coût de proximité des obstacles. Écrit à la main, il est aussi entièrement explicable dans ce
+rapport.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[node distance=6mm and 9mm, >=Stealth,
+  box/.style={draw, rounded corners, fill=blue!6, minimum width=2.6cm, minimum height=8mm, align=center, font=\small},
+  sim/.style={box, fill=orange!12}]
+  \node[sim] (scene) {CoppeliaSim\\scène + physique};
+  \node[box, right=of scene] (sens) {Capteurs\\\code{sensors.py}};
+  \node[box, right=of sens] (perc) {Perception\\obstacles imprévus};
+  \node[box, below=of perc] (nav) {Navigateur\\machine à états};
+  \node[box, below=of sens] (plan) {A*\\\code{planner.py}};
+  \node[box, below=of scene] (map) {Carte\\\code{occupancy.py}};
+  \node[box, below=of nav] (dock) {Accostage\\ArUco + lidar};
+  \node[box, left=of dock] (arm) {Bras youBot\\IK + pince};
+  \node[box, left=of arm] (drv) {Pilote youBot\\mécanum + UWB};
+  \node[box, above=of scene, xshift=-0mm] (lay) {\code{layout.py}\\(source unique)};
+  \draw[->] (lay) -- (scene);
+  \draw[->] (lay.west) -| ++(-0.6,0) |- (map.west);
+  \draw[->] (scene) -- (sens);
+  \draw[->] (sens) -- (perc);
+  \draw[->] (perc) -- (nav);
+  \draw[->] (map) -- (plan);
+  \draw[->] (plan) -- (nav);
+  \draw[->] (nav) -- (dock);
+  \draw[->] (dock) -- (arm);
+  \draw[->] (arm) -- (drv);
+  \draw[->] (drv.west) -| ++(-0.5,0) |- (scene.south west);
+\end{tikzpicture}
+\caption{Architecture logicielle (un module Python par fonction).}
+\end{figure}
+
+% ===========================================================================
+\section{Robot, cinématique et localisation}
+
+\subsection{Choix du robot : KUKA youBot}
+Le youBot (bibliothèque CoppeliaSim) a été préféré au Pioneer P3-DX initialement envisagé :
+\begin{itemize}
+  \item \textbf{roues mécanum} : déplacement omnidirectionnel (avant, latéral, rotation, ou les
+        trois à la fois). C'est très utile pour s'écarter d'une personne sans tourner et pour
+        l'accostage fin ;
+  \item \textbf{bras à 5 axes + pince} : le robot charge et décharge réellement les bacs ;
+  \item il n'a pas de capteurs : on y monte lidar, ultrasons et caméra (partie 3).
+\end{itemize}
+
+\subsection{Cinématique mécanum}
+Chaque roue porte des galets inclinés à $45^\circ$. Pour une consigne de vitesse dans le repère du
+robot $(v_x, v_y, \omega)$ (avant, gauche, rotation), avec $R = 0{,}05$\,m le rayon de roue et
+$L_x = 0{,}228$\,m, $L_y = 0{,}158$\,m les demi-entraxes :
+\begin{equation}
+\begin{aligned}
+\omega_{av,g} &= \tfrac{1}{R}\big(v_x - v_y - (L_x+L_y)\,\omega\big), &
+\omega_{av,d} &= \tfrac{1}{R}\big(v_x + v_y + (L_x+L_y)\,\omega\big),\\
+\omega_{ar,g} &= \tfrac{1}{R}\big(v_x + v_y - (L_x+L_y)\,\omega\big), &
+\omega_{ar,d} &= \tfrac{1}{R}\big(v_x - v_y + (L_x+L_y)\,\omega\big).
+\end{aligned}
+\end{equation}
+Validation : 0,4\,m demandés $\rightarrow$ 0,392\,m en avant et 0,388\,m en latéral ; 1,0\,rad
+$\rightarrow$ 1,006\,rad.
+
+\subsection{Commande de position}
+Pour rejoindre une pose $(x^*, y^*, \theta^*)$, l'erreur de position est exprimée dans le repère du
+robot et une loi proportionnelle saturée commande translation et rotation \emph{en même temps} :
+\[
+\begin{pmatrix} e_f \\ e_l \end{pmatrix} =
+\begin{pmatrix} \cos\theta & \sin\theta \\ -\sin\theta & \cos\theta \end{pmatrix}
+\begin{pmatrix} x^*-x \\ y^*-y \end{pmatrix},\qquad
+v = \min(v_{max},\, k_v\,d),\qquad \omega = \operatorname{sat}\big(k_\omega\,(\theta^*-\theta)\big).
+\]
+Test : carré de 1\,m parcouru en crabe (cap constant), environ 4\,s par côté, erreur réelle de 2 à 6\,cm.
+
+\begin{figure}[h]
+  \centering
+  \figimg{0.55}{test_square.png}
+  \caption{Carré de 1\,m en déplacement latéral : trajectoire réelle et mesurée.}
+\end{figure}
+
+\subsection{Localisation : balises UWB simulées, sans odométrie ni SLAM}
+\textbf{Choix :} la position vient d'un système de positionnement intérieur simulé
+(balises \emph{UWB} : vraie position + bruit gaussien $\sigma = 2$\,cm) et le cap d'un gyroscope
+(bruit $\sigma = 0{,}5^\circ$).
+
+\textbf{Justification :}
+\begin{itemize}
+  \item l'odométrie des roues mécanum est peu fiable (les galets glissent par construction) et dérive ;
+  \item un SLAM complet n'apporte rien quand le plan de l'usine est connu et fixe ; c'est d'ailleurs
+        le cas des AMR industriels, qui sont livrés avec la carte du site ;
+  \item les systèmes UWB existent réellement en usine (précision de l'ordre de quelques
+        centimètres) ;
+  \item la précision fine nécessaire au bras est obtenue \emph{localement} à l'accostage
+        (ArUco + lidar, section~\ref{sec:dock}), pas par la localisation globale.
+\end{itemize}
+Évolution possible : localisation par le lidar sur la carte connue (AMCL, filtre particulaire).
+
+% ===========================================================================
+\section{Capteurs et perception}
+
+\begin{table}[h]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}lLL@{}}
+\toprule
+\textbf{Capteur} & \textbf{Caractéristiques} & \textbf{Usage} \\
+\midrule
+Lidar Hokuyo URG-04LX (bibliothèque) & $240^\circ$, 684 points, 5\,m, à l'avant, 13\,cm du sol &
+  Obstacles imprévus, mesure de la face des tables (accostage) \\
+8 ultrasons (copiés du P3-DX) & Ceinture tout autour, cônes de $30^\circ$, portée 1\,m &
+  Angles morts du lidar (côtés, arrière), arrêt d'urgence à 0,22\,m \\
+Caméra (capteur de vision) & $640\times480$, $60^\circ$, inclinée de $15^\circ$ vers le bas &
+  Flux vidéo, marqueurs ArUco (identification + pose des postes) \\
+\bottomrule
+\end{tabularx}
+\caption{Capteurs montés sur le youBot.}
+\end{table}
+
+\paragraph{Points lidar.} Chaque mesure (profondeur) est transformée du repère du capteur au repère
+du robot par la matrice de pose du capteur, $p_{robot} = R\,p_{capteur} + t$ ; les points tombant
+sur le robot lui-même sont éliminés (boîte $0{,}36\times0{,}25$\,m). Validation : boîte attendue à
+0,95\,m mesurée à 0,950\,m, poteau attendu à 0,64\,m mesuré à 0,641\,m.
+
+\paragraph{Couverture et angles morts.} Les champs des capteurs ne sont pas recopiés à la main : ils
+sont \emph{lus dans la scène} (pose de chaque capteur par rapport au robot, volume de détection des
+ultrasons, angle et portée des capteurs de profondeur du lidar) et dessinés dans la vue de dessus
+temps réel. La figure~\ref{fig:couverture} montre que l'arrière du robot n'est couvert que par trois
+cônes d'ultrasons et qu'il reste des secteurs vides entre les cônes.
+
+\paragraph{Pas de lidar arrière (choix assumé).} Le Hokuyo couvre $240^\circ$ par construction et,
+monté à 13\,cm à l'avant, il aurait de toute façon le corps du robot dans son champ vers l'arrière.
+Les AMR industriels utilisent deux lidars de sécurité de $270^\circ$ sur deux coins opposés (vue
+fusionnée à $360^\circ$) ou un lidar en hauteur sur un mât (impossible ici : le bras et le bac
+seraient dans son champ). Un second lidar n'a pas été ajouté : coût de simulation (deux capteurs de
+vision rendus à chaque pas), risque de collision avec le bras et le bac, fusion des nuages de
+points. L'arrière est couvert par les ultrasons et l'arrêt d'urgence ; limite acceptée : une
+personne arrivant par l'arrière est détectée tard et ne peut pas être suivie (un ultrason donne une
+distance, pas une position ni une vitesse).
+
+\begin{figure}[h]
+  \centering
+  \figimg{0.45}{couverture_capteurs_atelier_cablage.png}
+  \caption{Couverture des capteurs, robot au dock (avant vers le haut) : champ du lidar en bleu,
+  cônes d'ultrasons (gris : rien, orange : écho, arc à la distance mesurée), points lidar en rouge.
+  L'ultrason arrière entend un opérateur que le lidar ne peut pas voir.}
+  \label{fig:couverture}
+\end{figure}
+
+\paragraph{Obstacles « imprévus ».} Un point détecté est \emph{expliqué par la carte} s'il tombe à
+moins de 15\,cm d'un objet cartographié (carte dilatée de 15\,cm). Les autres points sont des
+obstacles imprévus (personnes, objets égarés). Ils sont regroupés dans des cellules de 10\,cm et
+\textbf{mémorisés 1,5\,s}, de sorte qu'une personne sortie du champ du lidar (sur le côté du robot)
+n'est pas oubliée. Les ultrasons complètent le lidar dans ses angles morts. Leur mesure étant une
+simple distance dans un cône large, leur tolérance « expliqué par la carte » est plus grande
+(30\,cm).
+
+% ===========================================================================
+\section{Carte d'occupation}
+
+\textbf{Méthode :} grille de cellules de 5\,cm ($420\times260$ cellules pour l'atelier) générée à
+partir de \code{layout.py}. Un objet occupe une cellule s'il se trouve entre 2\,cm et 0,5\,m de
+hauteur (la hauteur du robot) : un écran en hauteur ne bloque pas, son pied si. Les personnes ne
+sont \emph{pas} sur la carte : elles bougent, c'est le lidar qui les gère.
+
+Trois couches :
+\begin{enumerate}
+  \item \textbf{occupée} : les objets ;
+  \item \textbf{interdite} (\emph{lethal}) : les objets dilatés par le rayon du robot
+        $r = 0{,}40$\,m (dilatation morphologique par un disque, OpenCV). Le \emph{centre} du robot
+        doit rester hors de cette zone, ce qui permet de planifier pour un point au lieu d'un
+        rectangle ;
+  \item \textbf{coût de confort} : à partir de la transformée de distance $d$ (distance de chaque
+        cellule à l'obstacle le plus proche),
+        \begin{equation}
+          c = \operatorname{clip}\!\left(\frac{r + C - d}{C},\,0,\,1\right),\qquad C = 0{,}45\ \text{m},
+        \end{equation}
+        qui décroît de 1 (contre la zone interdite) à 0 (à 0,85\,m de l'obstacle). Les chemins
+        restent ainsi au milieu des allées.
+\end{enumerate}
+
+\textbf{Justification :} la grille est la représentation la plus simple pour une carte 2D connue ;
+elle se combine directement avec A* et avec les détections du lidar, que l'on « peint » dans une
+copie de la carte pour re-planifier.
+
+\begin{figure}[h]
+  \centering
+  \figimg{0.85}{carte_chemins.png}
+  \caption{Carte d'occupation (noir : objets, gris : zone interdite, dégradé : coût de confort)
+  et chemins planifiés par A*.}
+\end{figure}
+
+% ===========================================================================
+\section{Planification globale : A*}
+
+\subsection{Principe}
+A* explore les cellules depuis le départ en développant toujours la cellule de plus petit
+\begin{equation}
+  f(n) = g(n) + h(n),
+\end{equation}
+où $g(n)$ est le coût du meilleur chemin connu du départ à $n$ et $h(n)$ une estimation du coût
+restant. Si $h$ ne surestime jamais le coût réel (heuristique \emph{admissible}), le premier chemin
+qui atteint le but est optimal.
+
+\subsection{Choix faits dans ce projet}
+\begin{itemize}
+  \item \textbf{Grille 8-connexe} : déplacements droits (coût 1) et diagonaux (coût $\sqrt2$).
+        On obtient des chemins plus courts et plus naturels qu'en 4-connexité.
+  \item \textbf{Heuristique octile}, exacte en l'absence d'obstacles sur une grille 8-connexe
+        (donc admissible et très informée) :
+        \begin{equation}
+          h = (\Delta x + \Delta y) + (\sqrt2 - 2)\,\min(\Delta x, \Delta y).
+        \end{equation}
+  \item \textbf{Coût de pas pondéré} par le confort : un pas de longueur $\ell$ vers une cellule de
+        coût $c$ coûte
+        \begin{equation}
+          \ell\,(1 + 4\,c).
+        \end{equation}
+        On obtient un compromis entre chemin court et marge vis-à-vis des obstacles.
+        L'heuristique reste admissible, car le coût de pas est toujours $\geq \ell$.
+  \item \textbf{Pas de coupe de coin} : un pas diagonal est refusé si l'une des deux cellules
+        voisines est interdite.
+  \item \textbf{Départ/but dans la zone interdite} : on prend la cellule libre la plus proche.
+  \item \textbf{Lissage par ligne de vue} : le chemin brut en escalier est simplifié. Depuis chaque
+        point conservé, on saute au point le plus lointain visible en ligne droite sans traverser de
+        cellule interdite ni de cellule de coût $> 0{,}6$. Il reste quelques points de passage
+        reliés par des segments droits (par exemple 3 points pour Dock $\rightarrow$ Sertissage,
+        15,8\,m).
+\end{itemize}
+
+\begin{algorithm}[h]
+\caption{A* sur la grille (avec coût de confort)}
+\begin{algorithmic}[1]
+\Require grille (interdite, coût), départ $s$, but $b$
+\Ensure liste de cellules de $s$ à $b$, ou échec
+\State $g[s] \gets 0$ ;\ \ \textsc{Ouverts} $\gets \{(h(s), s)\}$
+\While{\textsc{Ouverts} non vide}
+  \State $n \gets$ cellule de plus petit $f$ dans \textsc{Ouverts} (tas binaire)
+  \If{$n = b$} \Return chemin reconstruit par les parents \EndIf
+  \State marquer $n$ comme fermée
+  \For{chaque voisin $m$ de $n$ (8 directions), libre, non fermé, sans coupe de coin}
+     \State $g' \gets g[n] + \ell(n,m)\,(1 + 4\,c[m])$
+     \If{$g' < g[m]$}
+        \State $g[m] \gets g'$ ;\ \ parent$[m] \gets n$ ;\ \ ajouter $(g' + h(m), m)$ à \textsc{Ouverts}
+     \EndIf
+  \EndFor
+\EndWhile
+\State \Return échec
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Résultats}
+Les 8 poses de poste sont libres sur la carte ; les 28 paires de postes ont toutes un chemin ;
+le calcul prend environ 15\,ms par trajet. Cette rapidité permet de re-planifier en cours de route
+sans pénaliser le robot.
+
+% ===========================================================================
+\section{Suivi du chemin et évitement des obstacles}
+
+\subsection{Suivi : point de visée (type « pure pursuit »)}
+Le robot vise un point situé $0{,}6$\,m plus loin sur le chemin (la « carotte ») et s'oriente dans
+la direction du chemin, pour que le lidar regarde là où le robot va. La vitesse de croisière est de
+$0{,}45$\,m/s, modulée par :
+\begin{equation}
+v = V_{max}\cdot\operatorname{clip}\!\left(\frac{d_{bloc} - d_{stop}}{d_{lent} - d_{stop}},0,1\right)
+\cdot \max\!\big(0{,}25,\cos e_\theta\big)\cdot\min\!\left(1,\ \frac{d_{restant}}{0{,}8} + 0{,}3\right),
+\end{equation}
+avec $d_{bloc}$ la distance (le long du chemin) au premier obstacle dans un couloir de $\pm0{,}5$\,m,
+$d_{lent} = 1{,}8$\,m et $d_{stop} = 0{,}75$\,m. On obtient un ralentissement linéaire à l'approche
+d'un obstacle, un ralentissement dans les virages et un ralentissement à l'arrivée. Toute détection
+à moins de $1{,}2$\,m limite la vitesse à $0{,}2$\,m/s.
+
+\subsection{Machine à états}
+\begin{table}[h]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}lL@{}}
+\toprule
+\textbf{État} & \textbf{Comportement et transitions} \\
+\midrule
+\textsc{Suivre} & Suit le chemin. Obstacle dans le couloir à moins de 0,75\,m, ou n'importe
+  où à moins de 0,55\,m $\rightarrow$ \textsc{Attendre}. Ultrason dans la direction du mouvement
+  $< 0{,}22$\,m $\rightarrow$ arrêt d'urgence. À moins de 0,35\,m du but $\rightarrow$ \textsc{Final}. \\
+\textsc{Attendre} & Arrêté. Voie libre $\rightarrow$ \textsc{Suivre}. Bloqué plus de 3\,s
+  $\rightarrow$ re-planification A* en ajoutant les obstacles vus (disques de 0,35\,m) à la carte.
+  Obstacle qui se rapproche (plus de 10\,cm en 0,5\,s) $\rightarrow$ \textsc{S'écarter}. \\
+\textsc{S'écarter} & Se déplace (sans tourner, grâce au mécanum) dans une direction libre sur la
+  carte, à l'opposé des obstacles proches, jusqu'à 1\,m de distance $\rightarrow$ \textsc{Dégager}. \\
+\textsc{Dégager} & Attend que plus personne ne soit à moins de 1,2\,m pendant 1\,s, puis
+  re-planifie depuis la position atteinte. \\
+\textsc{Final} & Approche précise de la pose finale (position + cap) avec la loi P. \\
+\bottomrule
+\end{tabularx}
+\caption{États du navigateur.}
+\end{table}
+
+\paragraph{Direction d'écartement.} Chaque obstacle proche $p_i$ « repousse » le robot (position
+$p$) avec un poids qui croît quand il est proche :
+\begin{equation}
+\vec a = \sum_i \frac{p - p_i}{\max(\lVert p - p_i\rVert,\,0{,}1)^2}.
+\end{equation}
+On essaie la direction de $\vec a$ puis des directions décalées de $\pm30^\circ$, $\pm60^\circ$\dots\
+jusqu'à en trouver une libre sur la carte et qui éloigne réellement des obstacles.
+
+\textbf{Justification :} une machine à états explicite est prévisible, facile à tester et à
+expliquer, et elle suit la stratégie choisie dans le cahier des charges (ralentir, attendre,
+re-planifier). Des méthodes plus avancées (fenêtre dynamique DWA, champs de potentiel continus)
+restent des évolutions possibles. La prédiction du mouvement des personnes, d'abord prévue comme
+évolution, a été ajoutée (section~\ref{sec:suivi}).
+
+% ===========================================================================
+\section{Suivi des opérateurs et prédiction de leur mouvement}\label{sec:suivi}
+
+La perception de la section précédente ne voit que des \emph{points} : elle sait qu'il y a
+« quelque chose », pas s'il s'agit d'un carton posé ou d'une personne qui marche, ni dans quelle
+direction elle va. Le suivi transforme ces points en \emph{objets} avec une position et une vitesse.
+
+\subsection{Regroupement des points}
+Les points lidar non expliqués par la carte qui sont à moins de 0,6\,m les uns des autres forment
+un même objet (regroupement « single-linkage », par propagation d'étiquettes sur la matrice des
+distances). Le centre de l'objet est la moyenne de ses points.
+
+\textbf{Problème rencontré :} le lidar, à 13\,cm du sol, voit les \emph{jambes} des opérateurs. En
+pleine foulée les pieds sont à $\approx 0{,}5$\,m l'un de l'autre ; avec un seuil de 0,35\,m, chaque
+jambe devenait un objet (l'une presque immobile, l'autre à deux fois la vitesse de marche), d'où
+une erreur de vitesse de 0,4\,m/s. Le seuil de 0,6\,m réunit les deux jambes.
+
+\subsection{Filtre de Kalman à vitesse constante}
+Chaque objet a son propre filtre (OpenCV \code{cv2.KalmanFilter}). L'état est
+$\mathbf{x} = (x, y, v_x, v_y)^\top$, la mesure $\mathbf{z} = (x, y)^\top$ est le centre du groupe :
+\begin{equation}
+F = \begin{pmatrix} 1&0&\Delta t&0\\ 0&1&0&\Delta t\\ 0&0&1&0\\ 0&0&0&1 \end{pmatrix},\quad
+H = \begin{pmatrix} 1&0&0&0\\ 0&1&0&0 \end{pmatrix},\quad
+Q = G\,G^\top\sigma_a^2,\ \ G = \begin{pmatrix} \Delta t^2/2&0\\ 0&\Delta t^2/2\\ \Delta t&0\\ 0&\Delta t \end{pmatrix},\quad
+R = \sigma_m^2\,I,
+\end{equation}
+avec $\sigma_a = 1$\,m/s$^2$ (une personne peut changer de vitesse) et $\sigma_m = 0{,}12$\,m (le
+centre des jambes bouge pendant la marche). À chaque pas de 50\,ms :
+\begin{align}
+\text{prédiction : }& \hat{\mathbf{x}}^- = F\hat{\mathbf{x}},\qquad P^- = F P F^\top + Q,\\
+\text{correction : }& K = P^- H^\top (H P^- H^\top + R)^{-1},\quad
+  \hat{\mathbf{x}} = \hat{\mathbf{x}}^- + K(\mathbf{z} - H\hat{\mathbf{x}}^-),\quad P = (I - K H)P^-.
+\end{align}
+\textbf{Association :} les paires (objet suivi, groupe détecté) sont traitées de la plus proche à
+la plus éloignée (plus proche voisin), à moins de 0,8\,m de la prédiction. Un groupe non associé
+crée un nouvel objet ; un objet non revu pendant 1,5\,s est supprimé (entre-temps sa position
+continue d'être \emph{prédite} : une personne cachée un instant n'est pas oubliée) ; deux objets à
+moins de 0,5\,m l'un de l'autre sont fusionnés.
+
+\textbf{États :} un objet est confirmé après 4 détections ; il est \emph{en mouvement} si sa vitesse
+dépasse 0,15\,m/s, \emph{fixe} s'il reste sous ce seuil pendant 2\,s. Il est aussi noté comme
+« ayant bougé » s'il s'est éloigné de plus de 0,6\,m de sa première position confirmée : une
+personne arrêtée va repartir, un carton non. Ce critère porte sur la distance et non sur la
+vitesse : vu de loin puis sous d'autres angles pendant que le robot roule, un carton montre
+d'autres faces et le centre de ses points se décale ($\leq 0{,}3$\,m), ce qui ressemblait à une
+vitesse. Position prévue dans $t$ secondes : $\mathbf{p}(t) = \mathbf{p} + \mathbf{v}\,t$.
+
+\textbf{Validation} (\code{test\_tracking} : robot immobile 60\,s, comparaison avec les vraies
+positions et vitesses lues dans le simulateur ; un opérateur ne compte que s'il est réellement
+touché par le lidar) :
+\begin{table}[h]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}lLccc@{}}
+\toprule
+\textbf{Scène} & \textbf{Opérateur} & \textbf{Suivi} & \textbf{Erreur position} & \textbf{Erreur vitesse} \\
+\midrule
+Atelier & traverse à l'ouest & 98,5\,\% & 14\,cm & 0,09\,m/s \\
+Atelier & traverse à l'est & 96,4\,\% & 13\,cm & 0,08\,m/s \\
+Atelier & entre dans l'allée et s'arrête & 100\,\% & 4\,cm & 0,02\,m/s \\
+Arène de démonstration & traverse & 100\,\% & 8\,cm & 0,02\,m/s \\
+\bottomrule
+\end{tabularx}
+\caption{Précision du suivi (l'erreur de position est surtout un décalage constant : le lidar voit
+l'avant des jambes, le simulateur donne le centre du corps).}
+\end{table}
+
+\begin{figure}[h]
+  \centering
+  \figimg{0.8}{live_atelier_carte.png}
+  \caption{Carte temps réel : route A* (bleu), trajet (vert), opérateur suivi (orange) avec une
+  flèche vers sa position prévue 1,5\,s plus tard, objet fixe (gris).}
+\end{figure}
+
+\subsection{Utilisation dans la navigation}
+\begin{itemize}
+  \item \textbf{Croisement prévu :} les positions prévues d'une personne sur 3\,s (tous les
+        0,25\,s) qui tombent dans le couloir du robot sont un conflit \emph{seulement si} elle y
+        arrive au moment où le robot y passe. Le robot atteint un point situé à $d$ le long du
+        chemin en $d / v_{max}$ et l'a dépassé à $(d + 0{,}8)/v_{max}$ ; si la personne n'y est
+        prévue que plus d'1\,s après, le robot continue. En cas de conflit, il s'arrête 0,5\,m plus
+        tôt que pour un obstacle réel, pour attendre en dehors du passage.
+  \item \textbf{Déjà dans le passage :} si le robot est déjà sur la trajectoire d'une personne
+        encore loin (au moins 2\,s), il ne s'arrête pas sur place : il continue pour en sortir.
+  \item \textbf{Personne qui passe :} une personne dont la trajectoire prévue reste à plus de
+        0,8\,m du robot ne déclenche ni manœuvre d'écart ni limitation à 0,2\,m/s.
+  \item \textbf{Personne qui s'éloigne} sur le chemin : le robot la suit à $\approx 1{,}4$\,m au
+        lieu de s'arrêter (comme un régulateur de distance).
+  \item \textbf{Objet fixe qui n'a jamais bougé} (un carton) : re-planification après 0,5\,s au
+        lieu de 3\,s ; une personne arrêtée, elle, est attendue.
+  \item La traînée de points mémorisés derrière une personne qui marche est oubliée (le suivi
+        sait où elle est) ; les règles de sécurité sur ce qui est \emph{réellement} là (arrêt à
+        0,55\,m devant le robot, arrêt d'urgence par ultrasons) sont inchangées.
+\end{itemize}
+
+\subsection{Résultats : avec et sans prédiction}
+Les opérateurs de l'atelier ont été disposés pour cette étape : deux d'entre eux \emph{traversent}
+l'allée sur les trajets du robot, sans attendre le robot à distance (ils ne s'arrêtent que s'il est
+juste devant eux) et avec des pauses de 6\,s aux extrémités ; un troisième entre dans l'allée et y
+reste 12\,s. Mission complète (Dock $\rightarrow$ Magasin, chargement $\rightarrow$ Coupe,
+déchargement $\rightarrow$ Dock) :
+
+\begin{table}[h]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}lLL@{}}
+\toprule
+& \textbf{Sans prédiction} & \textbf{Avec prédiction (réglage final, 2 essais)} \\
+\midrule
+Durée de la mission & 167,6\,s & 162,4 et 175,4\,s \\
+Distance minimale à un opérateur & 0,74--0,77\,m & 0,78--0,86\,m \\
+Contacts & 0 & 0 \\
+\bottomrule
+\end{tabularx}
+\caption{Effet de la prédiction avec des opérateurs qui s'écartent au dernier moment.}
+\end{table}
+
+Avec des opérateurs qui \emph{ne réagissent jamais} au robot (essai préliminaire), la prédiction
+divisait les contacts par trois et faisait passer la distance minimale de 0,07\,m à 0,33--0,46\,m,
+sans pouvoir les supprimer tous : le youBot (0,45\,m/s) est plus lent que les opérateurs
+(0,7--0,8\,m/s). Le premier réglage de la prédiction s'arrêtait pour tout croisement prévu, même
+quand le robot serait passé à temps, et re-planifiait autour des opérateurs en pause : il était
+40\,s plus lent ; les deux règles ci-dessus (conflit dans le temps, objet « qui n'a jamais bougé »)
+ont corrigé cela. \textbf{Bilan :} la prédiction apporte surtout de la sécurité face à des
+personnes inattentives ; bien réglée, elle ne coûte pas de temps et garde plus de marge.
+
+\paragraph{Obstacle fixe absent de la carte.} Un carton est posé dans l'allée sur le chemin du
+Sertissage (hors de la carte). Le suivi le classe fixe 2,7\,s après l'avoir vu ; le robot s'arrête
+à 0,74\,m et re-planifie 0,5\,s plus tard (détour de 6,8\,m), 0 contact. Il a été placé à l'entrée
+de la partie de l'allée menant au Sertissage, car plus près il aurait obligé le robot à attendre
+ou à contourner dans le passage de l'opérateur qui traverse.
+
+% ===========================================================================
+\section{Accostage de précision : ArUco + lidar}\label{sec:dock}
+
+Après la navigation, le robot n'est connu qu'à environ 2\,cm et $1^\circ$ près, alors que le bras a besoin
+d'une précision de l'ordre du millimètre. L'accostage se fait en deux phases, chacune avec le
+capteur le mieux adapté.
+
+\subsection{Phase 1 : alignement par la caméra (marqueur ArUco)}
+Chaque table de transfert porte un marqueur ArUco (dictionnaire \code{4X4\_50}, 15\,cm, sur fond
+blanc). OpenCV détecte ses 4 coins avec un affinage sous-pixel, puis \code{solvePnP} (méthode
+\code{IPPE\_SQUARE}, spécifique aux cibles carrées planes) donne sa position et son orientation
+dans le repère de la caméra. Les paramètres intrinsèques viennent du simulateur :
+$f = \frac{W/2}{\tan(\alpha/2)}$, avec $W = 640$\,px et $\alpha = 60^\circ$. La pose est ramenée dans
+le repère du robot à partir de la pose de la caméra lue dans la scène, ce qui intègre automatiquement
+l'inclinaison de $15^\circ$.
+
+Le robot se place à $0{,}63$\,m face au marqueur, à l'aide d'un lissage exponentiel des mesures
+($x \leftarrow x + 0{,}4\,(x_{mes} - x)$) et d'une loi P. L'identifiant lu \emph{vérifie} en même
+temps qu'il s'agit du bon poste. Test : 24/24 détections, erreur de 1\,mm et $2{,}4^\circ$.
+
+\subsection{Phase 2 : approche par le lidar}
+De près, la caméra ne voit plus le marqueur en entier. La face avant de la table est une droite
+dans le nuage lidar : un ajustement par moindres carrés $f = a + b\,l$ sur les points situés
+devant le robot ($|l| < 0{,}25$\,m) donne la distance $a$ et l'angle $-\arctan b$ de la face. Le
+robot avance jusqu'à $0{,}40$\,m de la face. Test sur les 7 tables, départ avec $\pm10$\,cm et
+$\pm8^\circ$ d'erreur : erreur finale $\leq 5$\,mm et $\leq 0{,}2^\circ$.
+
+\textbf{Justification :} c'est la fusion de deux capteurs complémentaires. La caméra identifie le
+poste et corrige les grandes erreurs latérales ; le lidar est très précis en distance et en angle
+dans les derniers centimètres.
+
+% ===========================================================================
+\section{Manipulation : bras du youBot}
+
+\subsection{Cinématique inverse analytique}
+Les articulations 1 à 3 forment un bras plan à 3 segments ($L_1 = 0{,}155$, $L_2 = 0{,}135$,
+$L_3 = 0{,}19$\,m jusqu'au point de prise) ; l'articulation 0 oriente ce plan. Pour un point de
+prise $P$ et une inclinaison de pince $\varphi$ :
+\begin{enumerate}
+  \item angle de base : $j_0 = \operatorname{atan2}(\Delta y, \Delta x)$ ;
+  \item poignet : $W = P - L_3(\cos\varphi, -\sin\varphi)$ dans le plan du bras ;
+  \item triangle épaule--coude--poignet de côtés $L_1, L_2, d = \lVert SW\rVert$ : loi des cosinus,
+        \begin{equation}
+           \gamma = \arccos\frac{L_1^2 + d^2 - L_2^2}{2\,L_1\,d},
+        \end{equation}
+        solution « coude en haut » ;
+  \item on essaie d'abord l'inclinaison la plus forte, puis on la réduit par pas de $2^\circ$
+        jusqu'à une solution qui respecte les butées articulaires.
+\end{enumerate}
+La cinématique directe sert à vérifier la cinématique inverse (test : erreur $\leq 5$\,mm).
+\textbf{Justification :} pour un bras plan, la solution analytique est exacte, instantanée et sans
+problème de convergence, contrairement à un solveur numérique.
+
+\subsection{Prise, transport et dépose}
+Les bacs ont une poignée (petit poteau de $3\times3\times5$\,cm) que la pince serre. Les
+mouvements articulaires sont interpolés (profil « smoothstep » $3s^2 - 2s^3$, sans à-coups). La
+prise est confirmée par l'ouverture des doigts (ils s'arrêtent sur la poignée). Le bac est alors
+\emph{verrouillé} à la main pendant le transport, ce qui évite qu'il pivote autour de la poignée,
+puis relâché à la dépose avec la même inclinaison qu'à la prise, de façon à ce qu'il se pose bien à
+plat. Le bac est porté sur la plateforme arrière du robot (base du bras tournée à $167^\circ$).
+
+% ===========================================================================
+\section{Cellule de contrôle qualité}
+
+\begin{itemize}
+  \item \textbf{Décision par vision} : une caméra au-dessus du convoyeur d'inspection lit
+        l'étiquette du bac. Segmentation par seuils HSV (vert = conforme, rouge = défaut, le rouge
+        étant à cheval sur $H = 0/180$), puis composantes connexes (aire minimale de 40\,px). La
+        décision est prise quand l'étiquette passe au milieu de l'image, puis rangée dans une
+        \textbf{file FIFO} : les bacs ne peuvent pas se doubler sur un convoyeur.
+  \item \textbf{Bras UR5 + ventouse} : les mouvements courts (descente vers un bac, remontée) sont
+        des lignes droites cartésiennes. À chaque pas, la cible avance un peu sur la ligne et simIK
+        résout la cinématique inverse par \emph{moindres carrés amortis} :
+        \begin{equation}
+          \Delta q = J^\top\big(J J^\top + \lambda^2 I\big)^{-1} e,
+        \end{equation}
+        stable près des singularités. Le calcul se fait dans un monde IK séparé, plus robuste que
+        la synchronisation avec le bras dynamique.
+  \item \textbf{Transferts convoyeur $\leftrightarrow$ tables dans l'espace articulaire} : sur une
+        ligne droite passant près de la base de l'UR5, l'IK repliait le bras et son avant-bras
+        venait appuyer sur le convoyeur ; l'articulation de base restait bloquée et le bac était
+        relâché au-dessus du tapis. Désormais l'IK calcule seulement les angles \emph{finaux} et
+        toutes les articulations tournent ensemble de leur angle de départ à leur angle d'arrivée.
+        La somme épaule + coude + poignet variant linéairement, la ventouse reste orientée vers le
+        bas. La hauteur de passage au-dessus des tables a été abaissée (à 0,68\,m, la position était
+        à la limite de portée du bras).
+  \item \textbf{Vérification de la position réelle} : le monde IK atteint toujours sa cible, pas
+        forcément le bras réel. Après chaque mouvement avec un bac, la position réelle de la
+        ventouse est comparée à la cible ; au-delà de 3\,cm, la cellule s'arrête en défaut au lieu
+        de relâcher le bac ailleurs (comme une cellule industrielle).
+  \item \textbf{Une place par table} : la seconde place, derrière la première et trop près de la
+        base du bras (0,55\,m), obligeait le bras à se replier sur son propre socle. Chaque table a
+        donc une seule place ; si elle est occupée, le bac suivant attend en bout de convoyeur que
+        l'AMR ait emporté le premier.
+  \item \textbf{Arrêt d'accumulation} : une barrière lumineuse en bout de convoyeur arrête le tapis
+        quand un bac arrive et le relance quand le bras l'a soulevé. Les échecs de prise par la
+        ventouse sont passés de 21 à 0.
+  \item \textbf{Exécution en parallèle} : la cellule est écrite comme un générateur Python
+        (co-routine). Elle avance d'un pas avant chaque pas de simulation, quoi que fasse le robot
+        (rouler, s'accoster, manipuler), comme un automate indépendant.
+\end{itemize}
+
+% ===========================================================================
+\section{Validation et résultats}
+
+\begin{table}[h]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}lL@{}}
+\toprule
+\textbf{Test} & \textbf{Résultat} \\
+\midrule
+Déplacement mécanum & 0,4\,m $\rightarrow$ 0,392 / 0,388\,m ; 1,0\,rad $\rightarrow$ 1,006\,rad \\
+Carré de 1\,m & erreur réelle de 2 à 6\,cm (limitée par le bruit UWB) \\
+Capteurs & lidar 0,950 / 0,641\,m (attendu 0,95 / 0,64) ; ultrasons 0,65 / 0,42 / 0,65\,m \\
+Planification & 28/28 trajets, environ 15\,ms par trajet \\
+Navigation avec opérateurs & première disposition : 3 trajets, 0 contact, distance minimale 0,73\,m \\
+Suivi des opérateurs & 96--100\,\% du temps où ils sont visibles, erreur de vitesse 0,02--0,09\,m/s \\
+Prédiction & 0 contact, distance minimale 0,78--0,86\,m (0,74--0,77\,m sans prédiction), même durée \\
+Carton absent de la carte & classé fixe, re-planification 0,5\,s après l'arrêt, 0 contact \\
+ArUco & 24/24 détections, 1\,mm / $2{,}4^\circ$ \\
+Accostage & 7 tables, $\leq 5$\,mm / $\leq 0{,}2^\circ$ \\
+Prise / dépose & bac posé droit sur la table cible \\
+Mission complète & Dock $\rightarrow$ Magasin (chargement) $\rightarrow$ Coupe (déchargement)
+  $\rightarrow$ Dock : 162--176\,s simulées, 0 contact, deux opérateurs traversant l'allée ; en
+  parallèle, cellule CQ : un bac sur chaque table, le second bac conforme attend en bout de
+  convoyeur \\
+Arène de démonstration & 9/9 étapes réussies, 186\,s simulées, 0 contact \\
+\bottomrule
+\end{tabularx}
+\caption{Synthèse des tests.}
+\end{table}
+
+\begin{figure}[h]
+  \centering
+  \figimg{0.6}{demo_vue_dessus.png}
+  \caption{Arène de démonstration du youBot : une zone par capacité (capteurs, mécanum, chicane,
+  postes A/B avec marqueurs ArUco, passage d'un opérateur, carton absent de la carte, dock).}
+\end{figure}
+
+% ===========================================================================
+\section{Limites et perspectives}
+
+\begin{itemize}
+  \item \textbf{Personnes :} le robot prédit leur mouvement (vitesse constante) mais reste plus
+        lent qu'elles (0,45 contre 0,7--0,8\,m/s) : face à une personne qui ne fait \emph{jamais}
+        attention à lui, il peut encore être rattrapé, par exemple quand elle sort de derrière une
+        machine à moins d'un mètre de son chemin, ou quand il est déjà dans son passage. Un
+        modèle de déplacement plus riche (personnes qui tournent, s'arrêtent) et une vitesse de
+        robot plus élevée sont des pistes.
+  \item \textbf{Arrière du robot :} sans lidar arrière, une personne qui arrive par derrière n'est
+        vue que par les ultrasons, tard et sans être suivie ; un second lidar de coin serait
+        l'évolution naturelle.
+  \item \textbf{Suivi :} un carton vu pendant que le robot tourne autour peut paraître bouger
+        lentement ($\approx 0{,}2$\,m/s) ; cela ne change pas la décision (il n'a jamais parcouru
+        0,6\,m) mais apparaît sur l'affichage.
+  \item \textbf{Ultrasons :} leur cône large place parfois l'écho devant un mur vu en biais
+        (fausse détection). Le robot est alors simplement prudent ; une meilleure modélisation du
+        cône réduirait ces ralentissements.
+  \item \textbf{Localisation :} la localisation UWB est simulée ; un recalage lidar sur la carte
+        (AMCL) rendrait le robot plus autonome vis-à-vis de l'infrastructure.
+  \item \textbf{Cellule de contrôle qualité :} une seule place par table ; le bac suivant attend
+        en bout de convoyeur. Une table plus éloignée de la base de l'UR5 permettrait deux places.
+  \item \textbf{Intégration :} le gestionnaire de missions (ordres, batterie, ordres de reprise
+        automatiques depuis la table \textsc{Rebuts}) et l'interface de supervision constituent les
+        prochaines étapes ; un passage à ROS~2 (\code{simROS2}) est possible sans changer les
+        algorithmes.
+\end{itemize}
+
+\end{document}
