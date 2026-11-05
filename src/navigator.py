@@ -8,6 +8,7 @@ Perception (every step): unexpected obstacles = sensor detections NOT explained 
   - lidar points (front, 240 deg, 5 m),
   - sonar detections (all around, ~1 m): the lidar cannot see behind / beside the robot,
   - remembered for MEMORY seconds, so that a person leaving the field of view is not forgotten.
+  The unexpected LIDAR points also feed a tracker (src/tracker.py): objects with position + velocity.
 
 State machine (one decision every simulation step, 50 ms):
   FOLLOW   follow the route: drive towards a "carrot" point LOOKAHEAD m ahead on the route, facing
@@ -21,6 +22,17 @@ State machine (one decision every simulation step, 50 ms):
            CLEAR_DIST for CLEAR_TIME, and re-plan from there.
   FINAL    last centimetres: precise approach of the target pose (position + heading).
 Emergency stop while moving: a sonar looking in the direction of motion reads < SONAR_STOP.
+
+With the tracker (predict=True, plan B4; predict=False = the behaviour before, for comparisons):
+  - a moving person's positions over the next PREDICT_T s are obstacles too: the robot slows down and
+    stops PRED_MARGIN before his predicted crossing (outside his lane); if it is already in the lane
+    it drives on out of it; a person whose predicted path passes clear of the robot causes no escape
+    and no crawl; the trail of remembered points he leaves behind him is dropped (tracker knows him);
+  - a person walking AWAY along the route is not a reason to stop: the robot follows him at FOLLOW_GAP;
+  - a predicted crossing only counts if the person gets there around the time the robot does (not
+    TIME_MARGIN s after the robot has passed it): otherwise the robot just drives on;
+  - a STATIC object that never moved (a box, not a pausing worker) blocking the route: re-plan after
+    STATIC_REPLAN s instead of WAIT_REPLAN.
 """
 
 import math
@@ -33,6 +45,7 @@ import numpy as np
 from equip_youbot import SONARS
 from occupancy import RES, X0, Y0, OccupancyGrid
 from planner import Planner, path_length
+from tracker import STATIC_TIME, Tracker
 
 V_MAX = 0.45            # m/s cruise speed
 LOOKAHEAD = 0.6         # m, carrot distance on the route
@@ -47,13 +60,46 @@ CLOSING = 0.10          # m: nearest obstacle got this much closer in 0.5 s whil
 ESCAPE_SPEED, ESCAPE_DONE, ESCAPE_MAX_T = 0.35, 1.0, 8.0
 CLEAR_DIST, CLEAR_TIME = 1.2, 1.0
 MEMORY = 1.5            # s an obstacle point is remembered
+KNOWN_LIDAR = 0.15      # m: a lidar point this close to a mapped object is that object
+KNOWN_SONAR = 0.30      # m, same for a sonar echo: a sonar only gives a distance inside a wide cone; the
+                        # echo is placed on the cone's axis, which for a wall seen at an angle falls
+                        # ~15-25 cm in front of it (phantom "somebody" next to the chicane walls)
 SONAR_STOP = 0.22       # m
 PERSON_R = 0.35         # m, radius added to the map around obstacle points when re-planning
 FINAL_DIST = 0.35       # m from the goal: switch to precise approach
+# Using the tracker (plan B4, Navigator(predict=True)):
+PREDICT_T, PREDICT_DT = 3.0, 0.25   # s: predicted positions of a moving person (2 s was too short: at
+                                    # 0.7 m/s a worker covers 1.4 m, the robot needs ~2.5 s to clear his lane)
+PRED_MARGIN = 0.5       # m: a PREDICTED crossing stops the robot this much earlier than a real obstacle, so
+                        # it waits outside the person's lane (at STOP_DIST he walked into the stopped robot)
+EXIT_ZONE = 0.7         # m: predicted crossing closer than this along the route = the robot is already in
+                        # the person's lane: do not stop there, drive on to get out of it ...
+EXIT_MIN_T = 2.0        # s: ... but only if he needs at least this long to get there (~1.4 m at 0.7 m/s);
+                        # closer, the normal rules apply (stop, move out of his way)
+PASS_CLEAR = 0.8        # m: a person whose predicted path stays this far from the robot will pass by:
+                        # no escape manoeuvre, no 0.2 m/s crawl because of him
+PASS_LENGTH = 0.8       # m: the robot has passed a crossing point once it is this far beyond it (half
+                        # length 0.3 + person 0.3 + 0.2 margin) ...
+TIME_MARGIN = 1.0       # s: ... a person predicted there more than this after that moment is no conflict
+                        # (the robot used to stop for every predicted crossing, even ones it would
+                        # clear long before the person arrived: 40 s slower than without prediction)
+TRACK_R = 0.45          # m: remembered points this close to a moving person's recent path = his old trail
+TRAIL_STEPS = 30        # steps of a track's history = its last ~1.5 s (the obstacle memory)
+STATIC_REPLAN = 0.5     # s stopped in front of a STATIC object before re-planning (instead of WAIT_REPLAN)
+AWAY_SPEED = 0.25       # m/s along the route: a person walking away faster than this is followed, not a stop
+FOLLOW_GAP, FOLLOW_GAIN = 1.4, 0.8  # following a person walking away: target gap (m), speed gain (1/s)
 
 
 def wrap(a):
     return math.atan2(math.sin(a), math.cos(a))
+
+
+def _seg_dist(p, a, b):
+    """Distance from point p to the segment a-b."""
+    ab = b - a
+    n = float(np.dot(ab, ab))
+    t = 0.0 if n < 1e-9 else min(1.0, max(0.0, float(np.dot(np.asarray(p) - a, ab)) / n))
+    return float(np.hypot(*(np.asarray(p) - (a + t * ab))))
 
 
 class Route:
@@ -94,23 +140,29 @@ class Route:
 
 
 class Navigator:
-    def __init__(self, sim, robot, sensors, grid, draw=False, walkers=None, log=print):
+    def __init__(self, sim, robot, sensors, grid, draw=False, walkers=None, log=print, predict=True):
         # draw=True shows the planned route as a blue line (debugging only: in the demo it would make
         # the robot look like a line follower, which it is not - the route only exists in its memory)
         self.sim, self.robot, self.sensors, self.grid = sim, robot, sensors, grid
         self.planner = Planner(grid)
         self.log = log
-        r = int(round(0.15 / RES))                  # detections within 15 cm of a mapped object = "known"
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
-        self.known = cv2.dilate(grid.occupied.astype(np.uint8), k).astype(bool)
+        self.known = self._dilated(KNOWN_LIDAR)    # lidar detections this close to a mapped object = "known"
+        self.known_sonar = self._dilated(KNOWN_SONAR)
         self.memory = deque()                       # (time, N x 2 world points)
+        self.tracker = Tracker()                    # unexpected lidar objects with position + velocity
+        self.lidar_new = np.zeros((0, 2))           # this step's unexpected lidar points (world)
+        self.predict = predict                      # False = behaviour before the tracker (for comparisons)
+        self.predicted = np.zeros((0, 2))           # predicted positions of moving people (for drawing)
+        self.movers = []                            # moving tracks (this step)
         self.near_hist = deque()                    # (time, distance to the nearest obstacle)
         self.moving = False
         self.walkers = walkers or {}                # name -> handle (statistics only: true positions)
         self.drawing = sim.addDrawingObject(sim.drawing_lines, 5, 0, -1, 2000, [0.1, 0.4, 1.0]) if draw else None
         self.trail = []
+        self.route = None
         self.walker_trails = {n: [] for n in self.walkers}
         self.robot_coll = self.walker_coll = None
+        self.touching = False
         if self.walkers:
             self.robot_coll = sim.createCollection(0)
             sim.addItemToCollection(self.robot_coll, sim.handle_tree, robot.model, 0)
@@ -119,17 +171,23 @@ class Navigator:
                 sim.addItemToCollection(self.walker_coll, sim.handle_tree, h, 0)
 
     # ------------------------------------------------------------ perception
-    def _unknown(self, wx, wy):
+    def _dilated(self, dist):
+        r = int(round(dist / RES))
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+        return cv2.dilate(self.grid.occupied.astype(np.uint8), k).astype(bool)
+
+    def _unknown(self, wx, wy, known=None):
         i = np.clip(((wx - X0) / RES).astype(int), 0, self.grid.w - 1)
         j = np.clip(((wy - Y0) / RES).astype(int), 0, self.grid.h - 1)
-        return ~self.known[j, i]
+        return ~(self.known if known is None else known)[j, i]
 
     def perceive(self, pose, now):
         """Unexpected obstacles (world points): lidar + sonars not explained by the map, + memory."""
         x, y, h = pose
         c, s = math.cos(h), math.sin(h)
-        fl = [self.sensors.lidar_points()]
+        lidar = self.sensors.lidar_points()
         sonar = self.sensors.sonar_distances()
+        fl = [lidar]
         for name, f, l, _, deg in SONARS:
             d = sonar.get(name)
             if d is not None:
@@ -138,21 +196,92 @@ class Navigator:
         pts = np.vstack([p for p in fl if len(p)]) if any(len(p) for p in fl) else np.zeros((0, 2))
         if len(pts):
             wx, wy = x + pts[:, 0] * c - pts[:, 1] * s, y + pts[:, 0] * s + pts[:, 1] * c
-            keep = self._unknown(wx, wy)
+            n = len(lidar)
+            keep = np.concatenate((self._unknown(wx[:n], wy[:n]), self._unknown(wx[n:], wy[n:], self.known_sonar)))
+            self.lidar_new = np.column_stack((wx[:n][keep[:n]], wy[:n][keep[:n]]))
+            self.tracker.update(self.lidar_new, now)
             cur = np.column_stack((wx[keep], wy[keep]))
             cur = np.unique(np.round(cur / 0.1) * 0.1, axis=0) if len(cur) else cur   # 10 cm cells
         else:
+            self.lidar_new = np.zeros((0, 2))
+            self.tracker.update(self.lidar_new, now)
             cur = np.zeros((0, 2))
         self.memory.append((now, cur))
         while self.memory and now - self.memory[0][0] > MEMORY:
             self.memory.popleft()
-        allp = [p for _, p in self.memory if len(p)]
+        older = [p for t, p in self.memory if t < now and len(p)]
+        movers = [t for t in self.tracker.confirmed() if t.status == "moving"] if self.predict else []
+        if movers and older:
+            # a walking person leaves a trail of remembered points behind him (up to MEMORY s): the tracker
+            # knows where he is now, so that trail is dropped (it blocked the robot following him)
+            old = np.vstack(older)
+            trail = np.array([p for t in movers for p in t.history[-TRAIL_STEPS:]] + [tuple(t.pos) for t in movers])
+            d = np.min(np.hypot(old[:, None, 0] - trail[None, :, 0], old[:, None, 1] - trail[None, :, 1]), axis=1)
+            older = [old[d > TRACK_R]]
+        allp = [p for p in [cur] + older if len(p)]
         obs = np.unique(np.vstack(allp), axis=0) if allp else np.zeros((0, 2))
         near = float(np.min(np.hypot(obs[:, 0] - x, obs[:, 1] - y))) if len(obs) else 9.0
         self.near_hist.append((now, near))
         while self.near_hist and now - self.near_hist[0][0] > 0.6:
             self.near_hist.popleft()
+        self.movers = movers
         return obs, near
+
+    def predicted_block(self, route, s_robot, movers):
+        """Where the predicted paths of `movers` (next PREDICT_T s) cross the corridor ahead: distance
+        along the route to the first crossing, and True if the robot is already inside a crossing."""
+        steps = np.arange(PREDICT_DT, PREDICT_T + 1e-6, PREDICT_DT)
+        pred = [(t.pos + t.vel * k, k, t) for t in movers for k in steps]
+        self.predicted = np.array([p for p, _, _ in pred]).reshape(-1, 2)
+        best, inside, conflicts = float("inf"), False, set()
+        for p, k, t in pred:
+            s, lat = route.project(p, s_robot)
+            d = s - s_robot
+            if lat < CORRIDOR and 0 <= d < CHECK_AHEAD + PRED_MARGIN:
+                if d < EXIT_ZONE and k >= EXIT_MIN_T:
+                    inside = True               # he is still far: drive on out of his lane
+                elif k > (d + PASS_LENGTH) / V_MAX + TIME_MARGIN:
+                    continue                    # he gets there after the robot has passed: no conflict
+                else:
+                    best = min(best, d)
+                    conflicts.add(t.id)
+        return best, inside, conflicts
+
+    def _ahead_of_motion(self, obstacles, pos, route, s_robot):
+        """True if the nearest obstacle lies on the side the robot is driving towards (within 100 deg of
+        the route direction). Without the tracker (predict=False): always True (old behaviour)."""
+        if not self.predict or not len(obstacles):
+            return True
+        obs = np.asarray(obstacles)
+        p = obs[np.argmin(np.hypot(obs[:, 0] - pos[0], obs[:, 1] - pos[1]))]
+        a = math.atan2(p[1] - pos[1], p[0] - pos[0])
+        return abs(wrap(a - route.tangent(s_robot + 0.2))) < math.radians(100)
+
+    def passes_clear(self, pos, obstacles, no_conflict=()):
+        """True if the nearest obstacle is a moving person who is no danger: his predicted path stays
+        PASS_CLEAR away from the robot (he walks past, e.g. crossing in front of the stopped robot), or
+        he reaches the route only after the robot has passed (no_conflict: track ids)."""
+        if not self.predict or not self.movers or not len(obstacles):
+            return False
+        obs = np.asarray(obstacles)
+        p = obs[np.argmin(np.hypot(obs[:, 0] - pos[0], obs[:, 1] - pos[1]))]
+        owners = [t for t in self.movers if math.dist(t.pos, p) < 0.6]
+        return bool(owners) and all(t.id in no_conflict or _seg_dist(pos, t.pos, t.pos + t.vel * PREDICT_T) > PASS_CLEAR
+                                    for t in owners)
+
+    def tracks_ahead(self, route, s_robot, status):
+        """Confirmed tracks with this status in the corridor ahead: list of (track, distance along the
+        route from the robot, its speed along the route (+ = away from the robot))."""
+        out = []
+        statuses = (status,) if isinstance(status, str) else status
+        for t in self.tracker.confirmed():
+            if t.status not in statuses:
+                continue
+            s, lat = route.project(t.pos, s_robot)
+            if lat < CORRIDOR + t.size / 2 and 0 <= s - s_robot < CHECK_AHEAD + 1.0:
+                a = route.tangent(s)
+                out.append((t, s - s_robot, t.vel[0] * math.cos(a) + t.vel[1] * math.sin(a)))
+        return out
 
     def closing(self, near):
         """True if the nearest obstacle came CLOSING metres closer within the last 0.5 s."""
@@ -187,11 +316,13 @@ class Navigator:
                 cv2.circle(occ, self.grid.to_cell(*p), r, 1, -1)
             planner = Planner(OccupancyGrid(occ.astype(bool)))
         pts = planner.plan(start, goal)
+        if pts:
+            self.route = Route(pts)                 # the current route (drawn by src/live_view.py)
         if pts and self.drawing is not None:
             self.sim.addDrawingObjectItem(self.drawing, None)        # erase the previous route
             for p, q in zip(pts, pts[1:]):
                 self.sim.addDrawingObjectItem(self.drawing, [p[0], p[1], 0.03, q[0], q[1], 0.03])
-        return Route(pts) if pts else None
+        return self.route if pts else None
 
     def drive_world(self, vx, vy, turn, heading):
         """Command a velocity given in the WORLD frame (+ rotation)."""
@@ -220,17 +351,26 @@ class Navigator:
                 return d
         return None
 
-    def record(self, stats):
+    def record(self, stats, state="", event=None):
         x, y, _ = self.robot.true_pose()
         self.trail.append((x, y))
+        nearest = (float("inf"), None, None)
         for n, h in self.walkers.items():
             p = self.sim.getObjectPosition(h, self.sim.handle_world)
             self.walker_trails[n].append((p[0], p[1]))
-            stats["min_dist_worker"] = min(stats["min_dist_worker"], math.dist((x, y), p[:2]))
+            d = math.dist((x, y), p[:2])
+            stats["min_dist_worker"] = min(stats["min_dist_worker"], d)
+            nearest = min(nearest, (d, n, p[:2]), key=lambda e: e[0])
         if self.robot_coll is not None:
             hit = self.sim.checkCollision(self.robot_coll, self.walker_coll)
-            if (hit[0] if isinstance(hit, (list, tuple)) else hit) > 0:
+            touching = (hit[0] if isinstance(hit, (list, tuple)) else hit) > 0
+            if touching:
                 stats["contacts_moving" if self.moving else "contacts_stopped"] += 1
+                if not self.touching and event is not None:      # first step of a contact: say who / when
+                    d, n, p = nearest
+                    event(f"CONTACT with {n} at ({p[0]:.2f}, {p[1]:.2f}), robot at ({x:.2f}, {y:.2f}) "
+                          f"{'moving' if self.moving else 'stopped'}, state {state}")
+            self.touching = touching
 
     # ------------------------------------------------------------ main loop
     def go_to(self, goal, timeout=240.0):
@@ -249,7 +389,7 @@ class Navigator:
             nonlocal state, wait_t, last_try
             self.stop()
             self.near_hist.clear()      # "closing" must only measure people moving, not our own approach
-            state, wait_t, last_try = "WAIT", now, now
+            state, wait_t, last_try = "WAIT", now, -1e9    # (no re-plan tried yet at this stop)
             stats["stops"] += 1
             event(msg)
 
@@ -268,7 +408,33 @@ class Navigator:
             obstacles, near = self.perceive(pose, now)
             s_robot, _ = route.project(pos, max(0.0, s_robot - 0.3))
             remaining = route.length - s_robot
+            follow_v, static_block, away, inside, clear = None, False, [], False, False
+            if self.predict:
+                # people walking away along the route: no reason to stop, follow them at FOLLOW_GAP
+                away = [(t, d, v) for t, d, v in self.tracks_ahead(route, s_robot, "moving")
+                        if v > max(AWAY_SPEED, 0.7 * t.speed)]
+                if away:
+                    obstacles = [p for p in obstacles if all(
+                        _seg_dist(p, t.pos, t.pos + t.vel * PREDICT_T) > TRACK_R for t, _, _ in away)]
+                    follow_v = max(0.0, min(v + FOLLOW_GAIN * (d - FOLLOW_GAP) for _, d, v in away))
+                # a static object that NEVER moved (e.g. a box) in the way: re-plan at once. A worker who
+                # stopped will walk on: normal wait (re-planning around him made long detours)
+                # ("new" too: driving around a box shows other faces, its centre shifts and its label
+                # flips static / new - what counts is that it never moved and is known for STATIC_TIME)
+                static_block = any(d < STOP_DIST + 0.6 and not t.moved and now - t.created >= STATIC_TIME
+                                   for t, d, _ in self.tracks_ahead(route, s_robot, ("static", "new")))
             d_block = self.blocking_distance(route, s_robot, obstacles, pos)
+            if follow_v is not None:
+                d_block = min([d_block] + [d for _, d, _ in away if d < STOP_DIST])
+            if self.predict:
+                # people about to cross the route: stop PRED_MARGIN earlier than for a real obstacle (wait
+                # outside their lane); already in the lane ("inside"): drive on out of it, do not stop there
+                others = [t for t in self.movers if all(t is not a for a, _, _ in away)]
+                conflicts = set()
+                if others:
+                    d_pred, inside, conflicts = self.predicted_block(route, s_robot, others)
+                    d_block = min(d_block, d_pred - PRED_MARGIN)
+                clear = self.passes_clear(pos, obstacles, {t.id for t in others} - conflicts)
 
             if state == "FOLLOW":
                 if remaining < FINAL_DIST:
@@ -276,7 +442,9 @@ class Navigator:
                     event("final approach")
                 elif d_block < STOP_DIST:
                     to_wait(f"obstacle {d_block:.2f} m ahead on the route -> stop")
-                elif near < TOO_CLOSE:
+                elif near < TOO_CLOSE and self._ahead_of_motion(obstacles, pos, route, s_robot):
+                    # (somebody close BEHIND or beside a robot driving away from him: stopping would leave
+                    # the robot in his way - a crossing worker walked into the back of a stopped robot)
                     to_wait(f"somebody {near:.2f} m from the robot -> stop")
                 else:
                     carrot = route.point(s_robot + LOOKAHEAD)
@@ -285,11 +453,14 @@ class Navigator:
                     herr = wrap(route.tangent(s_robot + 0.2) - pose[2])
                     v = V_MAX * min(1.0, max(0.0, (d_block - STOP_DIST) / (SLOW_DIST - STOP_DIST)))
                     v = max(v, 0.08) * max(0.25, math.cos(herr)) * min(1.0, remaining / 0.8 + 0.3)
-                    if near < NEAR_PERSON:
+                    if follow_v is not None:
+                        v = min(v, follow_v)
+                    slow = near < NEAR_PERSON and not inside and not clear     # (see PASS_CLEAR, EXIT_ZONE)
+                    if slow:
                         v = min(v, NEAR_SPEED)
                         if not limited:
                             event(f"somebody {near:.2f} m away -> speed limited to {NEAR_SPEED} m/s")
-                    limited = near < NEAR_PERSON
+                    limited = slow
                     son = self.sonar_blocked(wrap(math.atan2(d[1], d[0]) - pose[2]))
                     if son:
                         stats["emergency_stops"] += 1
@@ -299,20 +470,22 @@ class Navigator:
 
             elif state == "WAIT":
                 self.stop()
-                if self.closing(near):
+                if self.closing(near) and not clear:
                     state, esc_t, clear_since = "ESCAPE", now, None
                     stats["escapes"] += 1
                     event(f"somebody keeps coming closer ({near:.2f} m) -> move out of the way")
                 elif d_block > STOP_DIST + 0.3 and near > TOO_CLOSE + 0.15 and now - wait_t > 0.5:
                     state = "FOLLOW"
                     event("way clear -> go on")
-                elif now - wait_t > WAIT_REPLAN and now - last_try > 2.0:
+                elif (now - wait_t > WAIT_REPLAN or (static_block and now - wait_t > STATIC_REPLAN)) \
+                        and now - last_try > 2.0:
                     last_try = now
                     new = self.plan(pose[:2], goal[:2], obstacles)
                     stats["replans"] += 1
                     if new is not None:
                         route, s_robot, state = new, 0.0, "FOLLOW"
-                        event(f"blocked {now - wait_t:.0f} s -> re-planned around the obstacle ({new.length:.1f} m)")
+                        why = "static object" if static_block else f"blocked {now - wait_t:.0f} s"
+                        event(f"{why} -> re-planned around the obstacle ({new.length:.1f} m)")
                     else:
                         event("re-plan failed, still waiting")
 
@@ -321,6 +494,8 @@ class Navigator:
                     self.stop()
                     clear_since = now if near > CLEAR_DIST else None
                     state = "CLEAR"
+                    self.near_hist.clear()  # (else the history from before the escape made "closing" fire
+                                            # again at once: 6 escape / wait flips in 0.5 s)
                     event(f"out of the way ({near:.2f} m) -> waiting until the person has passed")
                 else:
                     d = self.escape_direction(pos, obstacles, near)
@@ -331,7 +506,7 @@ class Navigator:
 
             elif state == "CLEAR":
                 self.stop()
-                if self.closing(near):
+                if self.closing(near) and not clear:
                     state, esc_t = "ESCAPE", now
                     stats["escapes"] += 1
                     event(f"coming closer again ({near:.2f} m) -> move out of the way")
@@ -364,7 +539,7 @@ class Navigator:
                 else:
                     self.moving = True
 
-            self.record(stats)
+            self.record(stats, state, event)
             sim.step()
 
         self.stop()
