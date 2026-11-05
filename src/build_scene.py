@@ -258,9 +258,9 @@ def make_detectable(sim, model):
         sim.setObjectSpecialProperty(s, SENSED)
 
 
-YIELD_LUA = f"""
+YIELD_LUA = """
 -- added by build_scene.py: the worker stops while the AMR is right in front of him
-YIELD_DIST, YIELD_WIDTH, YIELD_MAX = {layout.YIELD_DIST}, {layout.YIELD_WIDTH}, {layout.YIELD_MAX}
+YIELD_DIST, YIELD_WIDTH, YIELD_MAX = {dist}, {width}, {max}
 
 function robotAhead()
     if not robotRef then robotRef=sim.getObject('/youBot_ref', {{noError=true}}) end
@@ -312,11 +312,16 @@ def create_walker(sim, w, models_dir, parent):
     # the library model stops at 2 "pause points" placed for ITS original path; they would make
     # Bill stop at random places on our route: unregister them (pauses only at the route ends)
     txt = re.sub(r"\n\s*pausePoints\[\d\]=\{[^\n]*\}", "", txt)
+    for o in sim.getObjectsInTree(h, sim.handle_all, 0):          # ... and remove their red markers
+        if sim.getObjectAlias(o).startswith("pausePoint"):
+            sim.removeObjects([o])
     # Bill gives way to the robot: before each walking step, wait while the robot is in front of him
-    txt = txt.replace("function sysCall_thread()", YIELD_LUA + "\nfunction sysCall_thread()", 1)
-    for loop in ("while dist<pathL do", "while dist>0 do"):       # (script text has \r\n line ends)
-        txt = re.sub(rf"({re.escape(loop)}\r?\n)", r"\1            st=st+yieldToRobot()\n", txt, count=1)
-    assert txt.count("st=st+yieldToRobot()") == 2, "Bill script changed: yield hooks not inserted"
+    if w.yields:
+        lua = YIELD_LUA.format(dist=w.yield_dist or layout.YIELD_DIST, width=layout.YIELD_WIDTH, max=layout.YIELD_MAX)
+        txt = txt.replace("function sysCall_thread()", lua + "\nfunction sysCall_thread()", 1)
+        for loop in ("while dist<pathL do", "while dist>0 do"):       # (script text has \r\n line ends)
+            txt = re.sub(rf"({re.escape(loop)}\r?\n)", r"\1            st=st+yieldToRobot()\n", txt, count=1)
+        assert txt.count("st=st+yieldToRobot()") == 2, "Bill script changed: yield hooks not inserted"
     sim.setObjectStringParam(s, sim.scriptstringparam_text, txt)
     make_detectable(sim, h)
     # The walker is moved by small "teleports" every step. If his body is respondable, walking into
@@ -343,15 +348,15 @@ def main():
     sim.setObjectAlias(root, ROOT_NAME)
     sim.setModelProperty(root, 0)          # makes 'Atelier' a model: easy to delete/rebuild as one block
     groups = {}
-    for name in dict.fromkeys([p.group for p in layout.PARTS] + [m.group for m in layout.MODELS]):
+    for name in dict.fromkeys([p.group for p in layout.PARTS + layout.UNMAPPED] + [m.group for m in layout.MODELS]):
         g = sim.createDummy(0.05)
         sim.setObjectAlias(g, name)
         sim.setObjectParent(g, root, True)
         groups[name] = g
 
-    print(f"Creating {len(layout.PARTS)} shapes...")
+    print(f"Creating {len(layout.PARTS)} shapes + {len(layout.UNMAPPED)} NOT on the robot's map (stray box)...")
     handles = {}
-    for p in layout.PARTS:
+    for p in layout.PARTS + layout.UNMAPPED:
         create_part(sim, p, handles, groups)
 
     models_dir = sim.getStringParam(sim.stringparam_application_path) + "/models/"

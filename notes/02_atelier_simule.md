@@ -37,6 +37,25 @@ robot l'utilise pour identifier le poste et s'aligner précisément.
 Cette cellule illustre l'idée d'« atelier intelligent » : l'atelier **génère lui-même** des ordres de
 transport pour le robot.
 
+## Le carton oublié dans l'allée (obstacle absent de la carte)
+Un carton (0,5 × 0,5 × 0,4 m) a été « oublié » dans l'allée, à l'entrée de la partie de l'allée qui
+mène au Sertissage (x = 13,0 m, y = 6,35 m, près du milieu de l'allée, juste avant la ligne de
+poteaux x = 13,5 m). Il est
+présent dans la scène mais **volontairement absent de la carte** du robot (comme le carton de
+l'arène de démonstration) : le robot doit le découvrir avec son lidar et le contourner.
+
+- Il est sur tous les trajets vers le Sertissage venant de l'ouest (dock, Magasin, Coupe), qui
+  passent à y ≈ 6,7 m à cet endroit, et aussi sur les détours par le sud de l'allée. Au nord du
+  carton il ne reste que 0,65 m (trop étroit pour le robot), au sud 1,35 m : le robot le contourne
+  par le sud.
+- Pourquoi pas plus près du Sertissage : entre le passage de l'opérateur qui traverse (x = 15 m) et
+  la position d'accostage du Sertissage (x = 16,85 m), il n'y a que 1,85 m. Le robot s'arrête à
+  0,75 m d'un obstacle et la re-planification le maintient à ~0,75 m du carton : il aurait attendu
+  ou contourné **dans le passage de l'opérateur**, ou le carton aurait bloqué la place d'accostage.
+  À x = 13 m, le robot s'arrête vers x = 12 m et son détour se termine vers x = 13,9 m.
+- Il n'est sur aucun trajet de la mission Magasin → Coupe → dock (qui reste à x ≤ 10 m), et il est
+  à 3,8 m de la table du Sertissage (l'accostage n'est pas perturbé).
+
 ## Construction de la scène : une seule source de vérité
 L'atelier n'est pas dessiné à la main : il est **décrit sous forme de données** dans
 `src\layout.py` (position, taille, couleur de chaque élément), puis construit automatiquement dans

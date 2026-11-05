@@ -18,6 +18,7 @@ Bottom row (y < 4.25): Expédition, Test électrique (+ reject conveyor), Assemb
 """
 
 import math
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 HALL_X, HALL_Y = 20.0, 12.0
@@ -56,9 +57,11 @@ QC_CAM_X = 9.0                                   # camera gantry above the conve
 ARM_X, ARM_Y = 10.5, 3.45                        # UR5 base, right behind the two tables
 QC_SPEED = 0.10                                  # m/s, conveyor belt
 QC_TOTES = [(7.5, True), (8.1, False), (8.7, True)]   # (x, QC tag OK?) at start: all pass under the camera
-# where the UR5 puts sorted totes on a table: front spot (the youBot picks it there), then a buffer
-# spot behind it, closer to the arm. y offsets from the table centre (bottom row: front = +y)
-QC_SLOTS_DY = (TABLE_SIZE[1] / 2 - TOTE_INSET, -0.10)
+# where the UR5 puts sorted totes on a table: the front spot only (the youBot picks it there); while a
+# table is occupied, the next tote for it waits at the conveyor's end stop until the AMR has taken the
+# first one. y offsets from the table centre (bottom row: front = +y). (A buffer spot behind it, -0.10,
+# was dropped 2026-11-05: 0.55 m from the UR5's base, the arm folded onto its own pedestal reaching it.)
+QC_SLOTS_DY = (TABLE_SIZE[1] / 2 - TOTE_INSET,)
 
 S, N, W, E = -math.pi / 2, math.pi / 2, math.pi, 0.0   # headings (direction an object faces)
 
@@ -159,6 +162,8 @@ class Walker:
     pause_start: float = 3.0    # s waiting at the first point
     pause_end: float = 3.0      # s waiting at the last point
     role: str = ""
+    yields: bool = True         # gives way to the robot (see YIELD_*); False = walks on regardless
+    yield_dist: float | None = None   # m, robot centre this close in front of him -> he stops (None: YIELD_DIST)
 
 
 # Workers give way to the robot (like real operators trained to work next to AMRs): a worker stops
@@ -166,12 +171,27 @@ class Walker:
 # the side; after YIELD_MAX s he walks on anyway (the robot must then move out of his way).
 YIELD_DIST, YIELD_WIDTH, YIELD_MAX = 1.3, 0.7, 20.0
 
-# Part 6: walking workers, each one testing a different robot behaviour
+# Walking workers, each one testing a different robot behaviour (Part 6; changed 2026-11-05 for the
+# prediction work, plan B4: the worker who walked the whole main aisle was removed - he walked along
+# the robot's own route, so the robot only crawled behind him or met him head-on, with little to
+# predict. The two crossing workers do NOT wait for the robot from a distance: the robot must predict
+# their path itself. They only stop when the robot is RIGHT in front of them (CLOSE_YIELD), as people
+# do: with workers who never react at all, the youBot (0.45 m/s, slower than them) still got caught
+# in some runs, whatever it predicted.)
+CLOSE_YIELD = 0.9       # m centre to centre, i.e. ~0.5 m between the bodies
 WALKERS = [
-    Walker("operateur_allee", [(2.6, 6.1), (18.6, 6.1)], 0.8, 4.0, 4.0,
-           "walks the whole main aisle: head-on encounters / overtaking -> slow down, sideways dodge"),
-    Walker("operateur_traversee", [(15.0, 8.6), (15.0, 3.4)], 0.8, 5.0, 5.0,
-           "crosses the aisle between Sertissage and Assemblage -> stop and wait until he has passed"),
+    # lane x = 5.75, west of the x = 6.5 fence line, free on the map (y 0.05-8.30). (x = 4.9 was tried:
+    # better seen from the east, but only ~1.35 m from the Magasin table - the robot missed its grasp
+    # there twice, probably the worker walking through the lidar points used for docking.)
+    # pauses 6 s at each end (user, 2026-11-05: with 1.5 s the youBot, 0.45 m/s, never had time to cross
+    # his lane - ~3 s - between two crossings; he still walks about half the time)
+    Walker("operateur_traversee_ouest", [(5.75, 8.0), (5.75, 3.6)], 0.7, 6.0, 6.0,
+           "crosses the aisle between Magasin and Coupe, across the Magasin -> Coupe and Coupe -> dock routes; "
+           "-> predict, slow / stop early, pass behind him or while he waits at an end",
+           yield_dist=CLOSE_YIELD),
+    Walker("operateur_traversee", [(15.0, 8.6), (15.0, 3.4)], 0.8, 6.0, 6.0,
+           "crosses the aisle between Sertissage and Assemblage -> predict, stop early, pass behind him",
+           yield_dist=CLOSE_YIELD),
     Walker("operateur_arret", [(7.6, 8.8), (9.4, 6.4)], 0.7, 6.0, 12.0,
            "walks into the aisle in front of Coupe and stands there 12 s -> wait, then re-plan around him"),
 ]
@@ -192,6 +212,20 @@ MODELS: list[Model] = []
 LABELS: list[Label] = []
 _group = "batiment"
 _names: dict[str, int] = {}
+
+
+@contextmanager
+def collecting():
+    """Describe ANOTHER scene with the same helpers (e.g. the youBot demo arena, src/demo_layout.py):
+    inside the block, box() / model() / label() ... fill fresh lists, returned as (parts, models, labels);
+    the workshop's own lists are left untouched."""
+    global PARTS, MODELS, LABELS, _names, _group
+    saved = PARTS, MODELS, LABELS, _names, _group
+    PARTS, MODELS, LABELS, _names = [], [], [], {}
+    try:
+        yield PARTS, MODELS, LABELS
+    finally:
+        PARTS, MODELS, LABELS, _names, _group = saved
 
 
 def _unique(name):
@@ -266,10 +300,11 @@ def wall_run(side, start, end, openings=()):
             cursor = centre + LIB[key][1][1] / 2
 
 
-def aruco(station, x, y, z, facing):
+def aruco(station, x, y, z, facing, marker_id=None):
     """Real ArUco marker (library model, generated with the station's id) on a vertical face.
     facing: N / S / E / W, the direction the printed side looks to (towards the aisle).
-    (x, y) = position on the face. The marker is printed on a white plate: ArUco detection needs a
+    (x, y) = position on the face. marker_id: by default the station's id.
+    The marker is printed on a white plate: ArUco detection needs a
     light margin ("quiet zone") around the marker's black border."""
     # the model's printed side is its -z face (checked with the robot camera: the other way round,
     # OpenCV only decoded the mirrored image)
@@ -278,8 +313,8 @@ def aruco(station, x, y, z, facing):
     m = ARUCO_SIZE + 0.06
     box("aruco_fond", (0.002, m, m) if dx else (m, 0.002, m), (x + dx * 0.001, y + dy * 0.001, z), C["white"], kind="paint")
     x, y = x + dx * 0.0045, y + dy * 0.0045
-    model(f"aruco_{STATIONS[station]['marker_id']}", "aruco", x, y, z, rot=rot,
-          setup=dict(aruco=dict(id=STATIONS[station]["marker_id"], size=ARUCO_SIZE)))
+    mid = STATIONS[station]["marker_id"] if marker_id is None else marker_id
+    model(f"aruco_{mid}", "aruco", x, y, z, rot=rot, setup=dict(aruco=dict(id=mid, size=ARUCO_SIZE)))
 
 
 def table(name, cx, cy, length, width, height, heading=0.0, top=C["bench_top"], legs=C["bench_legs"]):
@@ -308,14 +343,14 @@ def reel(name, x, y, z0, d, w, color, axis="y"):
     return core
 
 
-def drop_table(station, cx, cy, facing, top=C["drop_top"]):
+def drop_table(station, cx, cy, facing, top=C["drop_top"], marker_id=None):
     """AMR transfer table ("poste de dépose"): low cabinet (TABLE_H high, closed down to the floor,
     so the lidar sees its front face) with the station's ArUco marker on the face towards the aisle."""
     sx, sy = TABLE_SIZE
     box("poste_depose_base", (sx, sy, TABLE_H - 0.02), (cx, cy, (TABLE_H - 0.02) / 2), C["drop_base"])
     box("poste_depose_plateau", (sx, sy, 0.02), (cx, cy, TABLE_H - 0.01), top)
     sign = -1 if facing == S else 1
-    aruco(station, cx, cy + sign * sy / 2, (TABLE_H - 0.02) / 2, facing)
+    aruco(station, cx, cy + sign * sy / 2, (TABLE_H - 0.02) / 2, facing, marker_id)
 
 
 def tote_on_table(station, content=None, tag=None):
@@ -576,3 +611,17 @@ def _build():
 
 
 _build()
+
+# A box somebody left in the aisle: built in the scene but kept OUT of PARTS, so it is NOT on the robot's
+# map (same as the demo arena's STRAY_BOX). It stands near the middle of the aisle at the entrance of
+# the Sertissage section, where every route to Sertissage from the west (dock, Magasin, Coupe) passes
+# (y 6.7 there), and also on the south side's detours: an errand to Sertissage must discover it and
+# re-plan. North of it only 0.65 m (too narrow for the robot), south of it 1.35 m: detours go south.
+# (First at y 6.7, user 2026-11-05: "move it a bit to the centre".)
+# Why not closer to Sertissage: between the east crossing lane (x = 15) and the Sertissage docking pose
+# (x = 16.85) there are only 1.85 m; the robot stops 0.75 m before an obstacle and A* keeps it ~0.75 m
+# from it, so the robot would have waited or detoured inside the worker's lane, or the box would have
+# blocked the docking pose. Here the robot stops at x ~12.0 and its detour ends by x ~13.9 (lane 15).
+# Not on the Magasin -> Coupe -> dock errand (x <= 10), 3.8 m from the Sertissage table (docking).
+STRAY_BOX = ((0.5, 0.5, 0.4), (13.0, 6.35))     # size, position
+UNMAPPED = [Part("carton_egare", "box", STRAY_BOX[0], (*STRAY_BOX[1], STRAY_BOX[0][2] / 2), C["cardboard"], "imprevu")]
