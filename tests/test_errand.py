@@ -8,6 +8,9 @@ Check: the reel tote ends on the Coupe table, upright; no contact with a worker;
 
 Needs scenes\atelier_cablage.ttt open. Run (PowerShell, from the project folder; ~10 min real):
   .\.venv\Scripts\python.exe -u tests\test_errand.py
+  --no-predict: navigation WITHOUT the tracker's predictions (behaviour before plan B4, to compare)
+  --live: live windows (camera, lidar + sonars, map; src\live_view.py), q in a window stops the run;
+          the first moment a moving worker is within 3 m saves media\live_atelier_<window>.png
 """
 
 import sys
@@ -21,8 +24,10 @@ import layout
 from arm import YouBotArm
 from docking import Docker
 from factory import Factory
+from live_view import LiveView
 from navigator import Navigator
 from occupancy import OccupancyGrid
+from qc_cell import check_totes
 from sensors import Sensors
 from transfer import Transfer
 from youbot import YouBot
@@ -30,6 +35,9 @@ from youbot import YouBot
 
 def main():
     sim = Factory(RemoteAPIClient())        # the QC cell (camera + UR5) sorts totes in the background
+    live = "--live" in sys.argv
+    if live:                                # windows on top of the factory (the QC cell keeps running)
+        sim = LiveView(sim, autosave="live_atelier")
     robot, sensors = YouBot(sim), Sensors(sim)
     walkers = {w.name: sim.getObject(f"/Atelier/operateurs_mobiles/{w.name}/Bill") for w in layout.WALKERS}
     tote = sim.getObject("/Atelier/bac_magasin")
@@ -39,7 +47,10 @@ def main():
     try:
         for _ in range(5):
             sim.step()
-        nav = Navigator(sim, robot, sensors, OccupancyGrid.from_layout(), walkers=walkers)
+        grid = OccupancyGrid.from_layout()
+        nav = Navigator(sim, robot, sensors, grid, walkers=walkers, predict="--no-predict" not in sys.argv)
+        if live:
+            sim.setup(robot, sensors, grid, nav=nav, walkers=walkers)
         tr = Transfer(sim, robot, sensors, Docker(sim, robot, sensors), YouBotArm(sim))
         t0 = sim.getSimulationTime()
         for step, station in (("go", "magasin"), ("load", "magasin"), ("go", "coupe"), ("unload", "coupe"), ("go", "dock")):
@@ -66,18 +77,21 @@ def main():
         ok &= on and upright
         qc = sim.qc.stats
         # true positions, not the cell's own word (a dropped tote was once reported as "placed")
-        on_tables = 0
-        for i, (_, good_tag) in enumerate(layout.QC_TOTES):
-            h = sim.getObject("/Atelier/bac_faisceau" + (f"_{i}" if i else ""))
-            x, y, z = sim.getObjectPosition(h, sim.handle_world)
-            table_x = layout.TEST_DROP_X if good_tag else layout.REBUTS_X
-            on_tables += abs(x - table_x) < 0.4 and abs(y - layout.DROP_BOT_Y) < 0.25 and abs(z - 0.355) < 0.02
-        print(f"QC cell meanwhile: inspected {qc['inspected']} totes, {on_tables}/{len(layout.QC_TOTES)} really on "
-              f"the right table (drops {qc['dropped']}, suction retries {qc['failed']})")
-        ok &= on_tables == len(layout.QC_TOTES)
+        good, total, lines = check_totes(sim)
+        print("\n".join(lines))
+        print(f"QC cell meanwhile: inspected {qc['inspected']} totes, {good}/{total} really where they should be "
+              f"(drops {qc['dropped']}, suction retries {qc['failed']})")
+        if sim.qc.fault:
+            print("QC cell FAULT:", sim.qc.fault)
+        ok &= good == total and not sim.qc.fault
+    except KeyboardInterrupt:
+        print("Stopped by the user.")
+        ok = False
     finally:
         robot.stop()
         sim.stopSimulation()
+        if live:
+            sim.close()
     print("RESULT:", "PASSED" if ok else "FAILED")
 
 

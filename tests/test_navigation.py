@@ -8,6 +8,8 @@ media\navigation_test.png. The current route is also drawn live in CoppeliaSim (
 Needs scenes\atelier_cablage.ttt open (robot at the dock).
 Run (PowerShell, from the project folder):
   .\.venv\Scripts\python.exe tests\test_navigation.py
+  --live: live windows (camera, lidar + sonars, map; src\live_view.py), q in a window stops the run;
+          the first moment a moving worker is within 3 m saves media\live_navigation_<window>.png
 """
 
 import sys
@@ -19,6 +21,7 @@ import cv2
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
 import layout
+from live_view import LiveView
 from navigator import Navigator
 from occupancy import OccupancyGrid
 from sensors import Sensors
@@ -44,6 +47,9 @@ def draw(grid, nav, path):
 
 def main():
     sim = RemoteAPIClient().require("sim")
+    live = "--live" in sys.argv
+    if live:
+        sim = LiveView(sim, autosave="live_navigation")
     robot, sensors = YouBot(sim), Sensors(sim)
     grid = OccupancyGrid.from_layout()
     walkers = {w.name: sim.getObject(f"/Atelier/operateurs_mobiles/{w.name}/Bill") for w in layout.WALKERS}
@@ -54,6 +60,8 @@ def main():
     try:
         for _ in range(5):
             sim.step()
+        if live:
+            sim.setup(robot, sensors, grid, nav=nav, walkers=walkers)
         for name in MISSION:
             print(f"--> going to {name}")
             r = nav.go_to(layout.STATIONS[name]["pose"])
@@ -62,9 +70,13 @@ def main():
                   f"{r['distance']} m, stops {r['stops']}, escapes {r['escapes']}, re-plans {r['replans']}, "
                   f"emergency stops {r['emergency_stops']}, min dist to a worker {r['min_dist_worker']} m, "
                   f"contacts: robot moving {r['contacts_moving']} / robot stopped {r['contacts_stopped']} steps")
+    except KeyboardInterrupt:
+        print("Stopped by the user.")
     finally:
         robot.stop()
         sim.stopSimulation()
+        if live:
+            sim.close()
         draw(grid, nav, ROOT / "media" / "navigation_test.png")
         print("Saved media\\navigation_test.png")
     ok = all(r["reached"] and r["contacts_moving"] == 0 and r["contacts_stopped"] == 0 for _, r in results)
