@@ -8,7 +8,10 @@ Live mode:  .\.venv\Scripts\python.exe tests\test_sensors.py --live
   opens 2 windows (camera + lidar/sonar view) while the robot turns slowly on the spot.
   Press q in a window (or Ctrl+C in PowerShell) to stop.
 
-Needs scenes\test_youbot.ttt open.
+Snapshot mode (any scene, e.g. the workshop): tests\test_sensors.py --snapshot
+  prints the sensor fields read from the scene, saves media\couverture_capteurs_<scene>.png.
+
+Needs scenes\test_youbot.ttt open (check and live modes).
 """
 
 import sys
@@ -44,8 +47,26 @@ def check(sim, sensors):
     img = sensors.camera_image()
     print("camera:", img.shape)
     cv2.imwrite(str(ROOT / "media" / "camera_robot.png"), img)
-    cv2.imwrite(str(ROOT / "media" / "lidar_scan.png"), draw_scan(pts, son))
+    cv2.imwrite(str(ROOT / "media" / "lidar_scan.png"), draw_scan(pts, son, geometry=sensors.geometry))
     print("Saved media\\camera_robot.png and media\\lidar_scan.png")
+
+
+def snapshot(sim, sensors):
+    """Any scene (e.g. the workshop, robot at the dock): sensor coverage around the robot, no expectations."""
+    for _ in range(5):
+        sim.step()
+    son = sensors.sonar_distances()
+    print("sonars:", son)
+    for name, g in sensors.geometry["sonars"].items():
+        print(f"  {name:15s} mount ({g['pos'][0]:+.2f}, {g['pos'][1]:+.2f}) dir {np.degrees(g['dir']):+5.0f} deg "
+              f"cone {np.degrees(2 * g['half']):.0f} deg {g['near']:.2f}-{g['far']:.2f} m")
+    li = sensors.geometry["lidar"]
+    print(f"lidar mount ({li['pos'][0]:+.2f}, {li['pos'][1]:+.2f}), range {li['range']} m, fields (dir, width deg):",
+          [(round(np.degrees(d)), round(np.degrees(2 * h))) for d, h in li["fields"]])
+    scene = Path(sim.getStringParam(sim.stringparam_scene_path_and_name)).stem
+    out = ROOT / "media" / f"couverture_capteurs_{scene}.png"
+    cv2.imwrite(str(out), draw_scan(sensors.lidar_points(), son, geometry=sensors.geometry))
+    print("Saved", out)
 
 
 def live(sim, sensors, robot):
@@ -53,7 +74,8 @@ def live(sim, sensors, robot):
     while True:
         sim.step()
         cv2.imshow("camera youBot", sensors.camera_image())
-        cv2.imshow("lidar + sonars", draw_scan(sensors.lidar_points(), sensors.sonar_distances()))
+        cv2.imshow("lidar + sonars", draw_scan(sensors.lidar_points(), sensors.sonar_distances(),
+                                               geometry=sensors.geometry))
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
@@ -67,6 +89,8 @@ def main():
     try:
         if "--live" in sys.argv:
             live(sim, sensors, robot)
+        elif "--snapshot" in sys.argv:
+            snapshot(sim, sensors)
         else:
             check(sim, sensors)
     except KeyboardInterrupt:
