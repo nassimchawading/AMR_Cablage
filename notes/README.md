@@ -10,6 +10,7 @@ Une note par partie du projet, rédigée au fur et à mesure.
 | `03_robot_youbot.md` | choix du youBot, cinématique mécanum, localisation UWB, commande, tests |
 | `04_capteurs.md` | lidar, ultrasons, caméra, traitement, validation |
 | `05_carte_et_planification.md` | carte d'occupation, zones interdite et de confort, algorithme A*, lissage, résultats |
-| `06_navigation_evitement.md` | opérateurs mobiles, perception, machine à états, corrections, résultats |
+| `06_navigation_evitement.md` | opérateurs mobiles, perception, machine à états, suivi et prédiction, carton imprévu, résultats |
+| `08_gestion_missions.md` | ordres de transport, priorités, machine à états d'un ordre, ordres créés par la cellule CQ, flux de bacs et opérateurs |
 
 Les images citées se trouvent dans `..\media\`.

@@ -127,6 +127,7 @@ class QCCell:
         self.dropped = False
         self.miss = 0.0                 # m, real pad <-> target after the last move
         self.fault = None               # set when the arm is blocked: the cell stops
+        self.on_placed = None           # callback(ok) after a tote was put on the OK / REBUTS table
 
     # ------------------------------------------------------------ sensors
     def camera_image(self):
@@ -269,6 +270,12 @@ class QCCell:
         """The AMR took the tote from the OK (ok=True) or REBUTS table: its spot is free again."""
         self.used[ok] = max(0, self.used[ok] - 1)
 
+    @property
+    def blocked(self):
+        """None, or the table (True = OK, False = REBUTS) the cell is waiting for: it is full and the
+        next tote for it stands at the end stop (the conveyor is stopped)."""
+        return self.queue[0] if self.full_reported and self.queue else None
+
     def _sort(self, y):
         ok = self.queue.pop(0)
         slot = self.used[ok]
@@ -326,3 +333,5 @@ class QCCell:
         self.used[ok] += 1
         self.stats["sorted"] += 1
         self.event(f"UR5: tote placed on the {'OK' if ok else 'REBUTS'} table")
+        if self.on_placed is not None:          # e.g. the mission manager creates the transport order
+            self.on_placed(ok)

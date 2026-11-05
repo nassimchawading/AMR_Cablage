@@ -21,6 +21,7 @@ from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
 import layout
 from qc_cell import QCCell, check_totes, find_tags
+from tote_flow import restore_scene
 
 TIMEOUT = 150.0
 
@@ -35,6 +36,7 @@ def main():
     sim.startSimulation()
     saved = False
     try:
+        restore_scene(sim)             # totes as built (a tote-stream run repaints / parks some)
         cell = QCCell(sim, simIK)
         n_ok = sum(ok for _, ok in totes)
         expected = min(n_ok, len(layout.QC_SLOTS_DY)) + min(len(totes) - n_ok, len(layout.QC_SLOTS_DY))

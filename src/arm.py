@@ -178,6 +178,9 @@ class YouBotArm:
         """Grasp the post centred at (fwd, left, z) and lift it. Returns True if a tote is held.
         phi: gripper pitch (rad); use the SAME pitch to place the tote, so that it lands level."""
         q, phi = ik(fwd, left, z) if phi is None else ik(fwd, left, z, phi, phi)
+        # list the loose objects again at every grasp: totes become dynamic later (Part 8.2: the
+        # operators take spare totes out of their static reserve; a list made at the first grasp missed them)
+        self._loose = None
         self.gripper(close=False, wait=0.3)
         self.go(*self._approach_point(fwd, left, z, phi), phi=phi)
         self.move_joints(q, 1.0)

@@ -16,6 +16,7 @@ from pathlib import Path
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
 import layout
+import tote_flow
 from equip_youbot import add_youbot
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -358,6 +359,7 @@ def main():
     handles = {}
     for p in layout.PARTS + layout.UNMAPPED:
         create_part(sim, p, handles, groups)
+    tote_flow.restore_scene(sim)          # spare totes in the hidden reserve: static (they must not fall)
 
     models_dir = sim.getStringParam(sim.stringparam_application_path) + "/models/"
     SENSED = sim.objectspecialproperty_collidable | sim.objectspecialproperty_measurable | sim.objectspecialproperty_detectable

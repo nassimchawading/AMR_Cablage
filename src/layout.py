@@ -62,6 +62,11 @@ QC_TOTES = [(7.5, True), (8.1, False), (8.7, True)]   # (x, QC tag OK?) at start
 # first one. y offsets from the table centre (bottom row: front = +y). (A buffer spot behind it, -0.10,
 # was dropped 2026-11-05: 0.55 m from the UR5's base, the arm folded onto its own pedestal reaching it.)
 QC_SLOTS_DY = (TABLE_SIZE[1] / 2 - TOTE_INSET,)
+# Part 8.2: the operators' reserve of empty / spare totes (src\tote_flow.py). Hidden UNDER the floor,
+# outside the hall (static, not respondable, invisible to the sensors, below the map's height band):
+# totes taken from the stations go there, the QC tote stream and the Magasin restocking reuse them.
+QC_SPARES = 4                                    # harness totes in the reserve at the start
+RESERVE = (-3.0, 2.0, -1.0)                      # first reserve place (x, y, z); the next ones 0.3 m further west
 
 S, N, W, E = -math.pi / 2, math.pi / 2, math.pi, 0.0   # headings (direction an object faces)
 
@@ -588,6 +593,8 @@ def _build():
     light_tower("convoyeur_controle", QC_X0 + 0.1, QC_Y + 0.4, 0.0)
     for x, ok in QC_TOTES:                                               # totes travelling to the arm
         tote("bac_faisceau", x, QC_Y, PICK_H + 0.005, "faisceau", ok)
+    for k in range(QC_SPARES):                                           # spares in the hidden reserve
+        tote("bac_reserve", RESERVE[0] - 0.3 * k, RESERVE[1] + 0.5, RESERVE[2], "faisceau", True)
     ur5_cell("ur5", ARM_X, ARM_Y)
     drop_table("test", TEST_DROP_X, DROP_BOT_Y, N)                       # OK -> Expédition (empty: the UR5 fills it)
 
