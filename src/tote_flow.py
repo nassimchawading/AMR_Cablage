@@ -37,12 +37,8 @@ SPAWN_FREE = 0.45                      # m: no tote this close to the conveyor s
 GREEN, RED = layout.C["green"], layout.C["red"]
 
 
-def _table(station):
-    """(x, y) of the tote spot on a station's table (as layout.tote_on_table)."""
-    x, _, heading = layout.STATIONS[station]["pose"]
-    if heading == layout.N:
-        return x, layout.DROP_TOP_Y - layout.TABLE_SIZE[1] / 2 + layout.TOTE_INSET
-    return x, layout.DROP_BOT_Y + layout.TABLE_SIZE[1] / 2 - layout.TOTE_INSET
+# every place a tote can stand on a station table: code (slot code or station marker id) -> (station, (x, y))
+SPOTS = {c: (s, layout.spot(c)[2]) for s in layout.STATIONS if s != "dock" for c in layout.spots(s)}
 
 
 class ToteFlow:
@@ -55,7 +51,7 @@ class ToteFlow:
         self.totes, self.tags, self.content = [], {}, {}
         for h, name in scene_totes(sim):
             self.totes.append(h)
-            self.content[h] = "bobines" if name == "bac_magasin" else "faisceau"
+            self.content[h] = "bobines" if name.startswith("bac_magasin") else "faisceau"
             kids = sim.getObjectsInTree(h, sim.sceneobject_shape, 1)
             tag = [k for k in kids if "etiquette" in sim.getObjectAlias(k)]
             if tag:
@@ -75,10 +71,12 @@ class ToteFlow:
                 self._park(h, quiet=True)
         self.k = 0                           # number of stream totes so far
         self.next_spawn = sim.getSimulationTime() + first
-        self.resting = {}                    # tote -> (station, time it was first seen resting there)
-        self.empty_since = None              # Magasin table empty since (s)
+        self.resting = {}                    # tote -> (spot code, time it was first seen resting there)
+        # each reel tote belongs to the Magasin slot it starts on (its reel colour = that slot's content)
+        self.home = {h: self._resting_on(h) for h in self.totes if self.content[h] == "bobines"}
+        self.empty_since = {}                # Magasin slot -> empty since (s)
         self.steps = 0
-        self.on_table = {}                   # station -> totes resting on its table (last look)
+        self.on_table = {}                   # spot code -> totes resting there (last look)
         self.stats = dict(spawned=0, taken=0, restocked=0, events=[])
 
     # ------------------------------------------------------------ helpers
@@ -108,23 +106,42 @@ class ToteFlow:
         sim.resetDynamicObject(h)
 
     def _resting_on(self, h):
-        """Station whose table this tote rests on (free: not held, not clamped, upright), or None."""
+        """Spot code (slot or station place) this tote rests on (free: not held, not clamped, upright),
+        or None."""
         sim = self.sim
         if sim.getObjectInt32Param(h, sim.shapeintparam_static):
             return None                      # in the reserve, in the gripper or clamped on the robot
         x, y, z = sim.getObjectPosition(h, sim.handle_world)
         if abs(z - REST_Z) > 0.02 or sim.getObjectMatrix(h, sim.handle_world)[10] < 0.98:
             return None
-        for station in CONSUMERS + ("magasin",):
-            tx, ty = _table(station)
-            if abs(x - tx) < layout.TABLE_SIZE[0] / 2 and abs(y - ty) < 0.2:
-                return station
+        for code, (_, (tx, ty)) in SPOTS.items():
+            if abs(x - tx) < 0.12 and abs(y - ty) < 0.2:
+                return code
         return None
 
-    def occupied(self, station):
-        """True if a tote stands on this station's table (the robot must not put another one there;
-        a Magasin order waits until there is one). Updated every CHECK_EVERY steps."""
-        return bool(self.on_table.get(station))
+    def occupied(self, where):
+        """True if a tote stands on this spot (slot code / station marker id), or on any spot of this
+        station (name). The robot must not put a tote on an occupied spot; a pickup waits for a tote.
+        Updated every CHECK_EVERY steps."""
+        if isinstance(where, str):
+            return any(self.on_table.get(c) for c in layout.spots(where))
+        return bool(self.on_table.get(where))
+
+    def take_by_hand(self, code):
+        """An operator takes away the tote(s) standing on this spot (called by the mission manager when
+        the robot could not take it). Returns how many totes were taken."""
+        totes = [h for h in self.totes if self._resting_on(h) == code]
+        for h in totes:
+            self._park(h)
+        self.on_table.pop(code, None)
+        if totes:
+            self.stats["by_hand"] = self.stats.get("by_hand", 0) + len(totes)
+            self.event(f"operator called: tote taken BY HAND from place {code}")
+        return len(totes)
+
+    def free_spot(self, station):
+        """First free place of a station (slot code / marker id), or None if all are occupied."""
+        return next((c for c in layout.spots(station) if not self.on_table.get(c)), None)
 
     # ------------------------------------------------------------ every step
     def tick(self):
@@ -139,7 +156,7 @@ class ToteFlow:
             where = self._resting_on(h)
             if where is not None:
                 self.on_table.setdefault(where, []).append(h)
-            if where in CONSUMERS:
+            if where is not None and SPOTS[where][0] in CONSUMERS:
                 st, since = self.resting.get(h, (where, t))
                 if st != where:
                     since = t
@@ -148,20 +165,22 @@ class ToteFlow:
                     del self.resting[h]
                     self._park(h)
                     self.stats["taken"] += 1
-                    self.event(f"tote taken from the {where} table")
+                    self.event(f"tote taken from the {SPOTS[where][0]} table (place {where})")
             else:
                 self.resting.pop(h, None)
-        if "magasin" in self.on_table:
-            self.empty_since = None
-        else:
-            self.empty_since = t if self.empty_since is None else self.empty_since
-            if t - self.empty_since >= self.restock_after and self.reserve["bobines"]:
-                x, y = _table("magasin")
+        for code in layout.spots("magasin"):
+            if self.on_table.get(code):
+                self.empty_since.pop(code, None)
+                continue
+            since = self.empty_since.setdefault(code, t)
+            back = [h for h in self.reserve["bobines"] if self.home.get(h) == code]
+            if t - since >= self.restock_after and back:
+                x, y = SPOTS[code][1]
                 m = [1.0, 0.0, 0.0, x, 0.0, 1.0, 0.0, y, 0.0, 0.0, 1.0, REST_Z + 0.002]
-                self._release(self.reserve["bobines"][0], m)
-                self.empty_since = None
+                self._release(back[0], m)
+                self.empty_since.pop(code, None)
                 self.stats["restocked"] += 1
-                self.event("Magasin restocked with a reel tote")
+                self.event(f"Magasin slot {code} restocked ({layout.INVENTORY.get(code, 'bobines')})")
 
     def _spawn(self, t):
         sim = self.sim
@@ -185,7 +204,7 @@ class ToteFlow:
                    f"next in {self.interval:.0f} s")
 
 
-TOTE_NAME = re.compile(r"^bac_(faisceau|reserve)(_\d+)?$|^bac_magasin$")
+TOTE_NAME = re.compile(r"^bac_(faisceau|reserve|magasin)(_\d+)?$")
 
 
 def scene_totes(sim):

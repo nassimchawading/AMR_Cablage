@@ -14,6 +14,8 @@ Windows (default):
                     tracked objects (orange = moving, arrow = predicted position 1.5 s ahead, grey = static)
   "carte"           map: planned A* route (blue), trail (green), remembered unexpected obstacles (red),
                     tracked objects with predictions, true worker positions (blue rings, simulator)
+  "ordres"          (with setup(..., mgr=MissionManager)) what the robot does, battery bar, order queue
+                    (with priority class), last orders, QC cell / operators counters (src\shift.py)
 mosaic=True: the same tiles + a text panel (chapter, pose, events) in ONE 2 x 2 window, as in the youBot
 demo; record=<path.mp4> also records it. Press q in a window: KeyboardInterrupt, so the program stops
 cleanly through its usual finally: blocks.
@@ -40,6 +42,32 @@ AHEAD = 1.5                 # s: predicted positions drawn
 AUTOSAVE_DIST = 3.0         # m
 
 
+def legend(img, cols=1, top=None):
+    """Small legend (drawn in place, returned): bottom-left corner of a map image, or from row `top`
+    (e.g. the free space under the map in the mosaic tile); cols = number of columns."""
+    items = [((220, 120, 0), "route A* prevue", "line"), ((0, 160, 0), "trajet parcouru", "line"),
+             ((30, 30, 230), "obstacle imprevu vu", "dot"), ((0, 140, 255), "operateur suivi + prediction", "dot"),
+             ((110, 110, 110), "objet suivi fixe", "dot"), ((200, 160, 160), "operateur (position vraie)", "ring"),
+             ((40, 40, 40), "robot", "ring")]
+    h = img.shape[0]
+    rows = -(-len(items) // cols)
+    x0, y0 = 6, (h - 8 - 15 * rows) if top is None else top + 14
+    overlay = img.copy()
+    cv2.rectangle(overlay, (x0 - 4, y0 - 12), (x0 + 215 * cols - 10, y0 + 15 * rows - 8), (255, 255, 255), -1)
+    cv2.addWeighted(overlay, 0.8, img, 0.2, 0, img)
+    for i, (col, text, kind) in enumerate(items):
+        x0 = 6 + 215 * (i // rows)
+        y = y0 + 15 * (i % rows)
+        if kind == "line":
+            cv2.line(img, (x0, y - 4), (x0 + 18, y - 4), col, 2)
+        elif kind == "dot":
+            cv2.circle(img, (x0 + 9, y - 4), 4, col, -1)
+        else:
+            cv2.circle(img, (x0 + 9, y - 4), 5, col, 1)
+        cv2.putText(img, text, (x0 + 26, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (40, 40, 40), 1, cv2.LINE_AA)
+    return img
+
+
 class LiveView:
     def __init__(self, sim, title="AMR", mosaic=False, record=None, show_map=True, map_window=None,
                  map_scale=2, autosave=None):
@@ -52,6 +80,7 @@ class LiveView:
         self.events = deque(maxlen=9)
         self.nav = None
         self.robot = None
+        self.mgr = None
         self.writer = None
         self.last = {}
 
@@ -62,9 +91,9 @@ class LiveView:
         print(msg)
         self.events.append(f"{self._sim.getSimulationTime():6.1f}s {msg.strip()}")
 
-    def setup(self, robot, sensors, grid, nav=None, walkers=None):
+    def setup(self, robot, sensors, grid, nav=None, walkers=None, mgr=None):
         """Call once the simulation runs (the camera / sensors answer)."""
-        self.robot, self.sensors, self.grid, self.nav = robot, sensors, grid, nav
+        self.robot, self.sensors, self.grid, self.nav, self.mgr = robot, sensors, grid, nav, mgr
         self.walkers = walkers or {}
         self.markers = MarkerDetector(self._sim)
         s = self.map_scale
@@ -145,6 +174,61 @@ class LiveView:
             yy += 30 if size > 0.45 else 24
         return out
 
+    def orders(self, w=560, h=600):
+        """Orders / battery panel (mission manager). Full size: separate "ordres" window; small (h < 500):
+        the 4th tile of the mosaic, with fewer lines."""
+        mgr, sim = self.mgr, self._sim
+        out = np.full((h, w, 3), 30, np.uint8)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        small = h < 500
+        lh, fs = (19, 0.42) if small else (24, 0.45)
+
+        def put(text, y, size=fs, col=(230, 230, 230), x=10, bold=1):
+            cv2.putText(out, text, (x, y), font, size, col, bold, cv2.LINE_AA)
+
+        t = sim.getSimulationTime()
+        put(f"POSTE  {int(t // 60):02d}:{int(t % 60):02d}  (temps simule)", 22 if small else 28,
+            0.52 if small else 0.6, (0, 220, 255), bold=2)
+        cur = mgr.current
+        act = {"IDLE": "en attente d'un ordre", "GO_CHARGE": "va a la borne de recharge",
+               "CHARGE": "en charge"}.get(mgr.activity, mgr.activity)
+        y = 50 if small else 64
+        put(act if cur is None else f"#{cur.id} {cur.what}", y, 0.62 if small else 0.75, (255, 255, 255), bold=2)
+        if cur is not None:
+            p = f"{cur.pickup}[{cur.pickup_slot}]" if cur.pickup_slot is not None else cur.pickup
+            d = f"{cur.drop}[{cur.drop_slot}]" if cur.drop_slot is not None else cur.drop
+            put(f"{p} -> {d}   {cur.state}" + ("   URGENT" if cur.urgent else ""), y + (22 if small else 28),
+                0.48 if small else 0.55, (200, 220, 255))
+        bat = getattr(sim, "battery", None)
+        y += 34 if small else 46
+        if bat is not None:                                   # battery bar
+            lvl, bw = bat.level, w - (180 if small else 160)
+            col = (60, 200, 60) if lvl >= 50 else (0, 170, 255) if lvl >= 25 else (40, 40, 230)
+            cv2.rectangle(out, (10, y), (10 + bw, y + 18), (90, 90, 90), 1)
+            cv2.rectangle(out, (11, y + 1), (11 + int((bw - 2) * lvl / 100), y + 17), col, -1)
+            put(f"batterie {lvl:5.1f} %" + (" (charge)" if bat.charging else ""), y + 15, fs, (255, 255, 255), x=bw + 18)
+        y += 44 if small else 50
+        queue = sorted(mgr.waiting, key=lambda o: (mgr.priority(o), o.created, o.id))
+        put(f"file d'attente ({len(queue)})", y, fs + 0.05, (0, 220, 255))
+        for o in queue[:3 if small else 7]:
+            y += lh
+            ready = "" if mgr.ready(o) else " (pas pret)"
+            put(f"[{mgr.priority(o)}] #{o.id} {o.what}: {o.pickup} -> {o.drop} {t - o.created:4.0f} s{ready}", y)
+        y = max(y + lh + 6, 220 if small else 360)
+        put("derniers ordres", y, fs + 0.05, (0, 220, 255))
+        cols = {"DONE": (120, 230, 120), "REFUSED": (0, 170, 255), "FAILED": (60, 60, 240), "CANCELLED": (160, 160, 160)}
+        for o in mgr.finished[-(3 if small else 6):][::-1]:
+            y += lh
+            put(f"#{o.id} {o.state:8s} {o.what}: {o.pickup_slot} -> {o.drop_slot} {o.done - o.started:4.0f} s",
+                y, fs, cols.get(o.state, (230, 230, 230)))
+        qc, flow = getattr(sim, "qc", None), getattr(sim, "flow", None)
+        if qc is not None and flow is not None:
+            put(f"cellule CQ: {qc.stats['inspected']} inspectes ({qc.stats['ok']} OK / {qc.stats['defect']} defaut), "
+                f"{qc.stats['sorted']} tries", h - (28 if small else 40), fs - 0.03, (200, 200, 200))
+            put(f"operateurs: {flow.stats['spawned']} bacs poses, {flow.stats['taken']} retires, "
+                f"{flow.stats['restocked']} reappros", h - (9 if small else 16), fs - 0.03, (200, 200, 200))
+        return out
+
     @staticmethod
     def _fit(img, w, h):
         """img scaled to width w, top of an h-high white tile (cropped if taller)."""
@@ -159,11 +243,12 @@ class LiveView:
             scan = self.scan(size=TILE_H, scale=60)
             tile = np.full((TILE_H, TILE_W, 3), 255, np.uint8)
             tile[:, (TILE_W - TILE_H) // 2:(TILE_W + TILE_H) // 2] = scan
-            m = self._fit(self.map(), TILE_W, TILE_H)
-            cv2.putText(m, "route A* (bleu)  trajet (vert)  obstacles imprevus (rouge)", (6, TILE_H - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (60, 60, 60), 1)
+            full = self.map()
+            m = self._fit(full, TILE_W, TILE_H)
+            legend(m, cols=2, top=min(TILE_H - 66, int(full.shape[0] * TILE_W / full.shape[1])))
+            info = self.orders(TILE_W, TILE_H) if self.mgr is not None else self.panel()
             frame = np.vstack((np.hstack((cv2.resize(self.camera(), (TILE_W, TILE_H)), tile)),
-                               np.hstack((m, self.panel()))))
+                               np.hstack((m, info))))
             self.last = {"mosaique": frame}
             cv2.imshow(self.title, frame)
             if self.record:
@@ -174,8 +259,10 @@ class LiveView:
         else:
             self.last = {"camera": self.camera(), "lidar_sonars": self.scan()}
             if self.show_map:
-                self.last["carte"] = self.map()
-            names = {"camera": "camera", "lidar_sonars": "lidar + sonars", "carte": "carte"}
+                self.last["carte"] = legend(self.map())
+            if self.mgr is not None:
+                self.last["ordres"] = self.orders()
+            names = {"camera": "camera", "lidar_sonars": "lidar + sonars", "carte": "carte", "ordres": "ordres"}
             for key, img in self.last.items():
                 cv2.imshow(names[key], img)
         self._maybe_autosave()

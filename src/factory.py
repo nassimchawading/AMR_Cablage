@@ -13,16 +13,20 @@ controller - and nothing waits for anything else.
 """
 
 import tote_flow
+from battery import Battery
 from qc_cell import QCCell
 
 
 class Factory:
-    def __init__(self, client, log=print, flow=False, **flow_args):
+    def __init__(self, client, log=print, flow=False, battery=None, **flow_args):
         self._sim = client.require("sim")
         self._client = client
         self.qc = None
         self.flow = None
+        self.battery = None
         self._flow_args = flow_args if flow else None
+        self._battery_args = battery          # e.g. dict(level=60.0): simulated AMR battery (Part 8.4)
+        self.tickers = []                     # more background jobs: fn() called before every step (shift script)
         self.log = log
 
     def __getattr__(self, name):            # everything else: the normal sim API
@@ -35,6 +39,8 @@ class Factory:
         self.qc = QCCell(self._sim, self._client.require("simIK"), log=self.log)
         if self._flow_args is not None:
             self.flow = tote_flow.ToteFlow(self._sim, log=self.log, **self._flow_args)
+        if self._battery_args is not None:
+            self.battery = Battery(self._sim, log=self.log, **self._battery_args)
         return r
 
     def step(self):
@@ -42,4 +48,8 @@ class Factory:
             self.qc.tick()
         if self.flow is not None:
             self.flow.tick()
+        if self.battery is not None:
+            self.battery.tick()
+        for fn in self.tickers:
+            fn()
         self._sim.step()

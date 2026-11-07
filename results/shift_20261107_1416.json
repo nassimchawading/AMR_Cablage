@@ -1,0 +1,113 @@
+{
+ "shift_min": 1.0,
+ "simulated_s": 114.1,
+ "wall_s": 351,
+ "orders": {
+  "created": 2,
+  "done": 1,
+  "refused": 0,
+  "failed": 0,
+  "cancelled": 0,
+  "waiting": 1,
+  "by_source": {
+   "qc": {
+    "done": 0,
+    "wait": {
+     "n": 0,
+     "mean": null,
+     "max": null
+    },
+    "exec": {
+     "n": 0,
+     "mean": null,
+     "max": null
+    }
+   },
+   "script": {
+    "done": 1,
+    "wait": {
+     "n": 1,
+     "mean": 0.0,
+     "max": 0.0
+    },
+    "exec": {
+     "n": 1,
+     "mean": 108.8,
+     "max": 108.8
+    }
+   },
+   "manual": {
+    "done": 0,
+    "wait": {
+     "n": 0,
+     "mean": null,
+     "max": null
+    },
+    "exec": {
+     "n": 0,
+     "mean": null,
+     "max": null
+    }
+   }
+  },
+  "in_progress": null
+ },
+ "interventions": [],
+ "robot_busy_pct": 95.3,
+ "qc": {
+  "inspected": 1,
+  "ok": 1,
+  "defect": 0,
+  "sorted": 1,
+  "fault": null
+ },
+ "operators": {
+  "spawned": 1,
+  "taken": 0,
+  "restocked": 0,
+  "by_hand": 0
+ },
+ "battery": {
+  "end": 54.9,
+  "used": {
+   "idle": 2.3,
+   "drive": 1.7,
+   "arm": 1.2
+  },
+  "charged": 0.0,
+  "distance_m": 11.1,
+  "charges": []
+ },
+ "navigation": {
+  "legs": 2,
+  "distance_m": 9.2,
+  "stops": 1,
+  "replans": 0,
+  "escapes": 0,
+  "min_dist_worker": 1.06,
+  "contacts_moving": 0,
+  "contacts_stopped": 0
+ },
+ "refusals": [],
+ "fault": null,
+ "order_list": [
+  {
+   "id": 1,
+   "what": "bobines rouges",
+   "source": "script",
+   "pickup": "magasin",
+   "pickup_slot": 11,
+   "drop": "coupe",
+   "drop_slot": 2,
+   "state": "DONE",
+   "result": "delivered in 109 s",
+   "created": 5.3,
+   "started": 5.3,
+   "done": 114.1,
+   "battery": [
+    59.9,
+    54.9
+   ]
+  }
+ ]
+}

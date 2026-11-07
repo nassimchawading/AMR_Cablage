@@ -1,0 +1,175 @@
+{
+ "shift_min": 12.0,
+ "simulated_s": 766.2,
+ "wall_s": 3619,
+ "orders": {
+  "created": 6,
+  "done": 3,
+  "refused": 0,
+  "failed": 1,
+  "waiting": 1,
+  "by_source": {
+   "qc": {
+    "done": 1,
+    "wait": {
+     "n": 1,
+     "mean": 54.5,
+     "max": 54.5
+    },
+    "exec": {
+     "n": 1,
+     "mean": 119.0,
+     "max": 119.0
+    }
+   },
+   "script": {
+    "done": 2,
+    "wait": {
+     "n": 2,
+     "mean": 0.1,
+     "max": 0.1
+    },
+    "exec": {
+     "n": 2,
+     "mean": 109.9,
+     "max": 111.3
+    }
+   },
+   "manual": {
+    "done": 0,
+    "wait": {
+     "n": 0,
+     "mean": null,
+     "max": null
+    },
+    "exec": {
+     "n": 0,
+     "mean": null,
+     "max": null
+    }
+   }
+  }
+ },
+ "robot_busy_pct": 70.8,
+ "qc": {
+  "inspected": 2,
+  "ok": 2,
+  "defect": 0,
+  "sorted": 2,
+  "fault": null
+ },
+ "operators": {
+  "spawned": 2,
+  "taken": 3,
+  "restocked": 2
+ },
+ "battery": {
+  "end": 91.9,
+  "used": {
+   "idle": 12.9,
+   "drive": 8.6,
+   "arm": 4.8
+  },
+  "charged": 73.2,
+  "distance_m": 57.2,
+  "charges": [
+   {
+    "reason": "low battery",
+    "start": 519.8,
+    "level_in": 24.7,
+    "reached": true,
+    "docked": true,
+    "arrived": 574.5,
+    "charged_at": 696.5,
+    "level_out": 95.1,
+    "end": 700.7
+   }
+  ]
+ },
+ "navigation": {
+  "legs": 9,
+  "distance_m": 41.0,
+  "stops": 11,
+  "replans": 4,
+  "escapes": 5,
+  "min_dist_worker": 0.78,
+  "contacts_moving": 0,
+  "contacts_stopped": 0
+ },
+ "refusals": [],
+ "fault": null,
+ "order_list": [
+  {
+   "id": 1,
+   "what": "bobines rouges",
+   "source": "script",
+   "pickup": "magasin",
+   "pickup_slot": 11,
+   "drop": "coupe",
+   "drop_slot": 2,
+   "state": "DONE",
+   "result": "delivered in 108 s",
+   "created": 5.3,
+   "started": 5.3,
+   "done": 113.8,
+   "battery": [
+    44.9,
+    39.9
+   ]
+  },
+  {
+   "id": 2,
+   "what": "faisceau OK",
+   "source": "qc",
+   "pickup": "test",
+   "pickup_slot": 5,
+   "drop": "expedition",
+   "drop_slot": 46,
+   "state": "DONE",
+   "result": "delivered in 119 s",
+   "created": 59.3,
+   "started": 113.8,
+   "done": 232.8,
+   "battery": [
+    39.9,
+    34.5
+   ]
+  },
+  {
+   "id": 3,
+   "what": "bobines noires",
+   "source": "script",
+   "pickup": "magasin",
+   "pickup_slot": 12,
+   "drop": "coupe",
+   "drop_slot": 2,
+   "state": "DONE",
+   "result": "delivered in 111 s",
+   "created": 245.3,
+   "started": 245.4,
+   "done": 356.7,
+   "battery": [
+    34.3,
+    29.2
+   ]
+  },
+  {
+   "id": 4,
+   "what": "faisceau OK",
+   "source": "qc",
+   "pickup": "test",
+   "pickup_slot": 5,
+   "drop": "expedition",
+   "drop_slot": null,
+   "state": "FAILED",
+   "result": "load failed 2 times: grasp failed (nothing between the fingers)",
+   "created": 458.4,
+   "started": 497.2,
+   "done": 519.8,
+   "battery": [
+    25.6,
+    24.7
+   ]
+  }
+ ]
+}

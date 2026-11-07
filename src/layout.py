@@ -70,19 +70,64 @@ RESERVE = (-3.0, 2.0, -1.0)                      # first reserve place (x, y, z)
 
 S, N, W, E = -math.pi / 2, math.pi / 2, math.pi, 0.0   # headings (direction an object faces)
 
+# Part 8.3 - CODED SLOTS ("emplacements codés"). Some tables hold several totes side by side; each place
+# has its own ArUco code on the table's face (dictionary 4X4_50, which has ids 0-49 ONLY: codes 61/62 were
+# tried first and the robot read nothing). Magasin 11-13 (station 1), south row 41-42 Assemblage, 46-47
+# Expedition. The robot docks on the SLOT's marker, and the code it reads is checked against the order.
+# code -> (station, offset along the aisle from the table centre, m). These tables are SLOT_TABLE_W wide,
+# so that the lidar still sees the table face over +-0.25 m (docking.LIDAR_ROI) at the outer slots.
+SLOT_TABLE_W = 1.20
+SLOTS = {11: ("magasin", -0.33), 12: ("magasin", 0.0), 13: ("magasin", 0.33),
+         41: ("assemblage", -0.25), 42: ("assemblage", 0.25),
+         46: ("expedition", -0.25), 47: ("expedition", 0.25)}
+assert all(0 <= c < 50 for c in SLOTS), "ArUco 4X4_50: codes 0-49 only"
+# Magasin inventory known by the mission manager: what each pick slot holds (one reel colour per slot)
+INVENTORY = {11: "bobines rouges", 12: "bobines noires", 13: "bobines bleues"}
+REEL_COLORS = {11: "red", 12: "cable_black", 13: "blue"}            # colour of the reels in each tote (C keys)
+
 # Stations: label (floor text, no accents: the 3D alphabet has none), ArUco id,
 # and the robot's target pose (x, y, heading in rad) to load/unload there.
 STATIONS = {
-    "magasin":     dict(label="MAGASIN",          marker_id=1, pose=(COL_CX[0], ROBOT_TOP_Y, N)),
+    # stations with coded slots: marker_id / pose = their FIRST slot (older programs dock there)
+    "magasin":     dict(label="MAGASIN",          marker_id=11, pose=(COL_CX[0] - 0.33, ROBOT_TOP_Y, N)),
     "coupe":       dict(label="COUPE DENUDAGE",   marker_id=2, pose=(COL_CX[1], ROBOT_TOP_Y, N)),
     "sertissage":  dict(label="SERTISSAGE",       marker_id=3, pose=(COL_CX[2], ROBOT_TOP_Y, N)),
-    "assemblage":  dict(label="ASSEMBLAGE",       marker_id=4, pose=(COL_CX[2], ROBOT_BOT_Y, S)),
+    "assemblage":  dict(label="ASSEMBLAGE",       marker_id=41, pose=(COL_CX[2] - 0.25, ROBOT_BOT_Y, S)),
     "test":        dict(label="TEST ELECTRIQUE",  marker_id=5, pose=(TEST_DROP_X, ROBOT_BOT_Y, S)),
-    "expedition":  dict(label="EXPEDITION",       marker_id=6, pose=(COL_CX[0], ROBOT_BOT_Y, S)),
+    "expedition":  dict(label="EXPEDITION",       marker_id=46, pose=(COL_CX[0] - 0.25, ROBOT_BOT_Y, S)),
     "dock":        dict(label="DOCK",             marker_id=0, pose=(1.1, 6.0, W)),
     # REBUTS table of the QC cell: rejected harnesses to take back to Assemblage for rework
     "rebuts":      dict(label="REBUTS",           marker_id=7, pose=(REBUTS_X, ROBOT_BOT_Y, S)),
 }
+def table_x(station):
+    """x of the centre of a station's table (the pose of a slot station is at its first slot)."""
+    x = STATIONS[station]["pose"][0]
+    mid = STATIONS[station]["marker_id"]
+    return x - SLOTS[mid][1] if mid in SLOTS else x
+
+
+def spots(station):
+    """Codes of a station's places for a tote: its slots, or just its own marker id."""
+    codes = [c for c, (s, _) in SLOTS.items() if s == station]
+    return codes or [STATIONS[station]["marker_id"]]
+
+
+def spot(code):
+    """(station, robot pose to dock there, tote centre (x, y) on the table) for a slot code or a
+    station's marker id."""
+    if code in SLOTS:
+        station, dx = SLOTS[code]
+    else:
+        station, dx = next(k for k, v in STATIONS.items() if v["marker_id"] == code), 0.0
+    x = table_x(station) + dx
+    _, ry, heading = STATIONS[station]["pose"]
+    if heading == N:        # top row: the robot looks north at the table
+        ty = DROP_TOP_Y - TABLE_SIZE[1] / 2 + TOTE_INSET
+    else:                   # bottom row
+        ty = DROP_BOT_Y + TABLE_SIZE[1] / 2 - TOTE_INSET
+    return station, (x, ry, heading), (x, ty)
+
+
 ARUCO_DICT = "4X4_50"    # dictionary used by the library marker model (choice 1)
 ARUCO_SIZE = 0.15        # marker side (m)
 
@@ -350,25 +395,28 @@ def reel(name, x, y, z0, d, w, color, axis="y"):
 
 def drop_table(station, cx, cy, facing, top=C["drop_top"], marker_id=None):
     """AMR transfer table ("poste de dépose"): low cabinet (TABLE_H high, closed down to the floor,
-    so the lidar sees its front face) with the station's ArUco marker on the face towards the aisle."""
-    sx, sy = TABLE_SIZE
+    so the lidar sees its front face) with the station's ArUco marker on the face towards the aisle.
+    A station with coded slots (SLOTS) gets a wider table and one marker per slot."""
+    codes = [c for c, (s, _) in SLOTS.items() if s == station]
+    sx, sy = (SLOT_TABLE_W, TABLE_SIZE[1]) if codes else TABLE_SIZE
     box("poste_depose_base", (sx, sy, TABLE_H - 0.02), (cx, cy, (TABLE_H - 0.02) / 2), C["drop_base"])
     box("poste_depose_plateau", (sx, sy, 0.02), (cx, cy, TABLE_H - 0.01), top)
     sign = -1 if facing == S else 1
-    aruco(station, cx, cy + sign * sy / 2, (TABLE_H - 0.02) / 2, facing, marker_id)
+    if codes:
+        for c in codes:
+            aruco(station, cx + SLOTS[c][1], cy + sign * sy / 2, (TABLE_H - 0.02) / 2, facing, c)
+    else:
+        aruco(station, cx, cy + sign * sy / 2, (TABLE_H - 0.02) / 2, facing, marker_id)
 
 
-def tote_on_table(station, content=None, tag=None):
-    """Tote waiting on a station's table, centred in front of the robot's docking position."""
-    x, _, heading = STATIONS[station]["pose"]
-    if heading == N:        # top row: the robot looks north at the table
-        y = DROP_TOP_Y - TABLE_SIZE[1] / 2 + TOTE_INSET
-    else:                   # bottom row
-        y = DROP_BOT_Y + TABLE_SIZE[1] / 2 - TOTE_INSET
-    return tote(f"bac_{station}", x, y, TABLE_H + 0.002, content, tag)
+def tote_on_table(station, content=None, tag=None, slot=None, reel=None):
+    """Tote waiting on a station's table, centred on the slot's marker (default: the station's
+    first place), where the robot docks."""
+    _, _, (x, y) = spot(slot if slot is not None else STATIONS[station]["marker_id"])
+    return tote(f"bac_{station}", x, y, TABLE_H + 0.002, content, tag, reel)
 
 
-def tote(name, x, y, z0, content=None, tag=None):
+def tote(name, x, y, z0, content=None, tag=None, reel=None):
     """Transport tote with a handle fin on top (one rigid body), dynamic: the conveyor carries it,
     the arms pick it. content: 'faisceau' (harness) or 'bobines' (reels). tag: True = green QC tag
     (OK), False = red (defect), None = no tag. The QC camera reads the tag colour."""
@@ -379,7 +427,7 @@ def tote(name, x, y, z0, content=None, tag=None):
         cyl(name + "_faisceau", 0.10, 0.02, (-0.05, 0.0, sz / 2 + 0.01), C["cable_black"], parent=b, kind="paint")
     elif content == "bobines":
         for dy in (-0.035, 0.035):
-            cyl(name + "_bobine", 0.06, 0.03, (-0.05, dy, sz / 2 + 0.015), CABLES[0], parent=b, kind="paint")
+            cyl(name + "_bobine", 0.06, 0.03, (-0.05, dy, sz / 2 + 0.015), reel or CABLES[0], parent=b, kind="paint")
     if tag is not None:
         box(name + "_etiquette", (0.05, 0.05, 0.004), (0.06, 0.0, sz / 2 + 0.002),
             C["green"] if tag else C["red"], parent=b, kind="paint")
@@ -553,7 +601,8 @@ def _build():
         for dy in (-0.2, 0.2):
             reel("bobine", 5.1 + dx, 8.75 + dy, top, 0.35, 0.30, CABLES[3], axis="z")
     drop_table("magasin", COL_CX[0], DROP_TOP_Y, S)
-    tote_on_table("magasin", content="bobines")            # reels ready to go to Coupe
+    for code in spots("magasin"):                           # reel totes on the coded slots (INVENTORY)
+        tote_on_table("magasin", content="bobines", slot=code, reel=C[REEL_COLORS[code]])
 
     group("coupe")
     cutting_machine("machine_coupe", 8.4, 10.9)
@@ -613,8 +662,8 @@ def _build():
 
     for key in ("magasin", "coupe", "sertissage", "assemblage", "test", "expedition"):
         group(key)
-        x, y, _ = STATIONS[key]["pose"]
-        label(STATIONS[key]["label"], x, 6.85 if y > 6 else 5.15)
+        y = STATIONS[key]["pose"][1]
+        label(STATIONS[key]["label"], table_x(key), 6.85 if y > 6 else 5.15)
 
 
 _build()

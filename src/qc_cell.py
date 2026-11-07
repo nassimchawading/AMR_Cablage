@@ -53,6 +53,8 @@ RED = [((0, 120, 80), (8, 255, 255)), ((172, 120, 80), (180, 255, 255))]
 MIN_AREA = 40                                   # px, tag blob (a 5 cm tag is ~400 px in the 256 x 256 image)
 BAND = 25                                       # px: "in the middle of the image" band (half width)
 MISS_MAX = 0.03                                 # m: real pad farther than this from a carry target = arm blocked
+SETTLE_TOL, SETTLE_MAX = 0.003, 2.0             # before releasing a tote: real pad within 3 mm (wait at most 2 s)
+GRIP_CHECK = False                              # shift the pad by the tote's offset before putting it down: NOT TESTED yet (2026-11-07)
 
 
 def check_totes(sim, root="/Atelier"):
@@ -126,6 +128,9 @@ class QCCell:
         self.full_reported = False
         self.dropped = False
         self.miss = 0.0                 # m, real pad <-> target after the last move
+        self.release_miss = None        # m, real pad <-> target when the last tote was released
+        self.pick_miss = None           # m, real pad <-> point above the post when the suction was switched on
+        self.grip_offset = None         # (dx, dy) m, tote handle - pad when the last tote was put down (grip check)
         self.fault = None               # set when the arm is blocked: the cell stops
         self.on_placed = None           # callback(ok) after a tote was put on the OK / REBUTS table
 
@@ -241,6 +246,14 @@ class QCCell:
         # the IK world always reaches its target: check that the REAL pad did too
         self.miss = math.dist(self.sim.getObjectPosition(self.tip, self.sim.handle_world), p)
 
+    def _settle(self, target):
+        """Wait (at most SETTLE_MAX) until the REAL pad is within SETTLE_TOL of target; self.miss = what is left."""
+        for _ in range(int(SETTLE_MAX / self.sim.getSimulationTimeStep())):
+            self.miss = math.dist(self.sim.getObjectPosition(self.tip, self.sim.handle_world), target)
+            if self.miss < SETTLE_TOL:
+                return
+            yield
+
     def wait(self, seconds):
         for _ in range(int(seconds / self.sim.getSimulationTimeStep())):
             yield
@@ -292,6 +305,10 @@ class QCCell:
         self.event(f"UR5: tote at the end stop (y {y:.3f}) -> {'OK' if ok else 'REBUTS'} table, spot {slot + 1}")
         yield from self.move_to((END_X, y, CLEAR_Z))
         yield from self.move_to((END_X, y, BELT_POST_TOP + 0.03), speed=0.15)
+        # the pad latches wherever it touches the post: be right above it first (the real arm lagged ~1.3 cm
+        # behind its target here, so every tote hung off-centre and was put down 1-1.5 cm off its spot)
+        yield from self._settle((END_X, y, BELT_POST_TOP + 0.03))
+        self.pick_miss = self.miss
         self.suction(True)
         # the pad's sensor only detects 1-5 mm below its face (measured), and the post's height varies
         # by a few mm (totes jostle at the end stop): sweep slowly down THROUGH that window to light
@@ -307,9 +324,27 @@ class QCCell:
             self.event("UR5: suction failed, retrying")
             return
         self.dropped = False
-        for target, speed, joint_space in (((END_X, y, CLEAR_Z), 0.2, False), ((tx, ty, tz), SPEED, True),
-                                           ((tx, ty, TABLE_POST_TOP + 0.03), 0.15, False),
-                                           ((tx, ty, TABLE_POST_TOP + 0.004), 0.05, False)):
+        moves = [((END_X, y, CLEAR_Z), 0.2, False), ((tx, ty, tz), SPEED, True),
+                 ((tx, ty, TABLE_POST_TOP + 0.03), 0.15, False), ((tx, ty, TABLE_POST_TOP + 0.004), 0.05, False)]
+        k = 0
+        while k < len(moves):
+            target, speed, joint_space = moves[k]
+            if k == 2 and GRIP_CHECK and not self.dropped:
+                # GRIP CHECK before putting the tote down: the tote hangs 1-1.5 cm off-centre from the pad
+                # (measured on 6 totes, same every run), and the youBot gripper only tolerates ~+-2 cm on the
+                # table. A real cell checks the gripped part (camera looking at the gripper); here the tote's
+                # offset from the pad is read in the simulation, and the pad is shifted by it so that the
+                # HANDLE lands on the spot.
+                tote = self.sim.getObjectParent(self.pad_link)
+                p, q = self.sim.getObjectPosition(tote, self.sim.handle_world), \
+                    self.sim.getObjectPosition(self.tip, self.sim.handle_world)
+                dx, dy = p[0] - q[0], p[1] - q[1]
+                self.grip_offset = (dx, dy)
+                tx, ty = tx - dx, ty - dy
+                moves[2] = ((tx, ty, TABLE_POST_TOP + 0.03), 0.15, False)
+                moves[3] = ((tx, ty, TABLE_POST_TOP + 0.004), 0.05, False)
+                target = moves[2][0]
+            k += 1
             yield from self.move_to(target, speed, carrying=True, joint_space=joint_space)
             if not self.dropped and self.miss > MISS_MAX:
                 # the arm is blocked (collision): never release the tote somewhere else; stop the cell
@@ -326,6 +361,11 @@ class QCCell:
                 self.queue.insert(0, ok)
                 yield from self.move_to((END_X, layout.QC_Y, CLEAR_Z), joint_space=True)
                 return
+        # release only once the REAL pad is on its target: the dynamic arm lags behind the IK world, and
+        # releasing ~1.5 cm short put the totes 1-2 cm off their spot along the aisle (measured, 6 totes),
+        # where the youBot gripper only tolerates ~+-2 cm (a missed grasp then pushed the tote 4 cm deeper)
+        yield from self._settle((tx, ty, TABLE_POST_TOP + 0.004))
+        self.release_miss = self.miss
         self.suction(False)
         yield from self.wait(0.3)
         yield from self.move_to((tx, ty, tz), speed=0.2)

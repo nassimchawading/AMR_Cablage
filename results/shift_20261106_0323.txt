@@ -1,0 +1,18 @@
+END OF SHIFT - 12 min planned, 12.8 min simulated (60 min real)
+Orders: 6 created, 3 done, 0 refused, 1 failed, 1 still waiting
+  qc    : 1 done, waiting mean 54.5 s (max 54.5), execution mean 119.0 s (max 119.0)
+  script: 2 done, waiting mean 0.1 s (max 0.1), execution mean 109.9 s (max 111.3)
+Robot busy 70.8 % of the shift (orders + charging)
+QC cell: 2 inspected (2 OK, 0 defect), 2 sorted, fault None
+Operators: 2 totes put on the belt, 3 taken, 2 restocks
+Battery: end 91.9 %, used idle 12.9 / drive 8.6 / arm 4.8 %, 1 charge(s), charged 73.2 %
+Navigation: 9 drives, 41.0 m, 11 stops, 4 re-plans, 5 escapes, min distance to a worker 0.78 m, contacts 0 moving / 0 stopped
+Refusals: none
+Manager fault: None
+
+Orders:
+  #1 bobines rouges: magasin[11] -> coupe[2]    script DONE     waited     0 s, executed   108 s, stops 1, re-plans 0, contacts 0
+  #2 faisceau OK: test[5] -> expedition[46]     qc     DONE     waited    54 s, executed   119 s, stops 4, re-plans 2, contacts 0
+  #3 bobines noires: magasin[12] -> coupe[2]    script DONE     waited     0 s, executed   111 s, stops 4, re-plans 0, contacts 0
+  #4 faisceau OK: test[5] -> expedition         qc     FAILED   waited    39 s, executed    23 s, stops 1, re-plans 1, contacts 0
+  #6 bobines rouges: magasin -> coupe           script still waiting

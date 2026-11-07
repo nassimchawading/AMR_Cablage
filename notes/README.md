@@ -11,6 +11,7 @@ Une note par partie du projet, rédigée au fur et à mesure.
 | `04_capteurs.md` | lidar, ultrasons, caméra, traitement, validation |
 | `05_carte_et_planification.md` | carte d'occupation, zones interdite et de confort, algorithme A*, lissage, résultats |
 | `06_navigation_evitement.md` | opérateurs mobiles, perception, machine à états, suivi et prédiction, carton imprévu, résultats |
-| `08_gestion_missions.md` | ordres de transport, priorités, machine à états d'un ordre, ordres créés par la cellule CQ, flux de bacs et opérateurs |
+| `08_gestion_missions.md` | ordres de transport, priorités, machine à états d'un ordre, ordres créés par la cellule CQ, flux de bacs et opérateurs, emplacements codés et vérification du code, batterie et recharge, programme « poste de travail » et bilan, application d'ordres manuels |
+| `10_interface.md` | fenêtres de suivi en direct (caméra, lidar + sonars, carte, ordres), mosaïque et enregistrement vidéo, fenêtre de commande |
 
 Les images citées se trouvent dans `..\media\`.

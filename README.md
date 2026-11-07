@@ -56,10 +56,16 @@ Every installation is logged in [INSTALL_LOG.md](INSTALL_LOG.md).
       (`media\navigation_test.png`)
 - [x] Part 7: docking (camera ArUco + lidar, <= 5 mm) and youBot arm pick / carry / place of totes
       on low transfer tables; `tests\test_errand.py`: full errand Magasin -> Coupe among workers
-- [ ] Part 8: mission manager (transport orders, state machine, charging)
+- [x] Part 8: mission manager (`src\missions.py`): transport orders with priorities, created by the
+      QC cell, by a script or by hand; coded slots (one ArUco code per place, code checked before
+      docking); operators and a regular tote stream (`src\tote_flow.py`); simulated battery with
+      automatic charging (`src\battery.py`); one shift program (`src\shift.py`) with a small
+      manual-order window (`src\order_app.py`)
 - [x] Part 9: quality-control cell: camera decides OK / defect (OpenCV), conveyor stops at the
       end stop, UR5 sorts onto the OK / REBUTS tables; runs in the background (`src\factory.py`)
-- [ ] Part 10: interface (live video, map, order tracking, send the robot on errands)
+- [~] Part 10: interface: live windows (camera, lidar + sonars, map with legend, orders panel), one
+      2x2 mosaic window + video recording (`src\shift.py --mosaic --record poste.mp4`), manual-order
+      window. Still possible: a 3D chase camera tile
 - [ ] Part 11: evaluation + report material, demo video
 
 Report notes (French) are written as we go in [notes\](notes/README.md).
@@ -75,6 +81,20 @@ Version history: git (one snapshot per finished part).
 .\.venv\Scripts\python.exe src\snapshot.py      # pictures in media\
 .\.venv\Scripts\python.exe src\inspect_models.py # measure library models (media\library\)
 ```
+
+**Run a shift** (the whole workshop working; workshop scene open in front, simulation NOT started -
+the program starts and stops it). In PowerShell, after `cd C:\Users\Nassim\Documents\AMR_Cablage`:
+```
+.\.venv\Scripts\python.exe -u src\shift.py                          # 30 simulated min, live windows
+.\.venv\Scripts\python.exe -u src\shift.py --minutes 15 --battery 45 # shorter, a charge happens
+.\.venv\Scripts\python.exe -u src\shift.py --no-live                 # without windows (faster)
+.\.venv\Scripts\python.exe -u src\shift.py --mosaic --record poste.mp4 # one 2x2 window, video in media\
+```
+Windows: camera, lidar + sonars, map, "ordres" (current order, battery, queue), and the manual-order
+window "Ordres AMR" (add an order, urgent or not; cancel a waiting order; pause / resume the scripted
+orders; send the robot to charge). Press q in a camera/map window or Ctrl+C in the terminal to stop early. The end-of-shift summary is printed and saved in
+`results\shift_<date>_<time>.txt` (+ `.json`). With the windows, the simulation runs about 5x slower
+than real time (12 simulated minutes = 1 hour).
 
 **Tests** (in PowerShell, after `cd C:\Users\Nassim\Documents\AMR_Cablage`; Ctrl+C stops a program):
 ```
